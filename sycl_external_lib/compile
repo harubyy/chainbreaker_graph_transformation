@@ -1,0 +1,10 @@
+#!/bin/bash
+echo "compiling"
+dpcpp -I${MKLROOT}/include -I${MKLROOT}/examples/dpcpp -DMKL_ILP64 -DSYCL_DEVICES_cpu -c sparse_trsv.cpp -o sptrsv.o
+
+echo "linking"
+dpcpp sptrsv.o -fsycl-device-code-split=per_kernel \
+"${MKLROOT}/lib/intel64"/libmkl_sycl.a -Wl,-export-dynamic -Wl,--start-group \
+"${MKLROOT}/lib/intel64"/libmkl_intel_ilp64.a "${MKLROOT}/lib/intel64"/libmkl_tbb_thread.a \
+"${MKLROOT}/lib/intel64"/libmkl_core.a -Wl,--end-group \
+-L${TBBROOT}/lib/intel64/gcc4.8 -ltbb -lsycl -lOpenCL -lpthread -lm -ldl -o sptrsv

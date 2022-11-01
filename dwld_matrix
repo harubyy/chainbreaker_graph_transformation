@@ -1,0 +1,19 @@
+#!/bin/bash
+# $1: matrix id
+# $2: matrix name
+# $3: matrix group
+
+ssget -e -i $1
+rm -rf $HOME"/.config/ssget/MM/"$3"/"$2"/"     # otherwise cache doesnt work
+rm $HOME"/.config/ssget/MM/"$3"/"$2".tar.gz"
+
+ssget -e -i $1
+
+if [  ! -d ~/.ufget/MM/"$3" ];
+then
+  mkdir ~/.ufget/MM/"$3"/
+fi
+
+
+cp -r  ~/.config/ssget/MM/"$3"/* ~/.ufget/MM/"$3"/
+#cp -r  ~/.config/ssget/MM/"$3"/"$2" ~/.ufget/MM/"$3"/
