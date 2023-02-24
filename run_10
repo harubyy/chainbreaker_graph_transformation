@@ -1,0 +1,19 @@
+#!/bin/bash
+
+while read matrix
+do
+  ID=`echo $matrix | cut -d',' -f1`
+  name=`echo $matrix | cut -d',' -f2`
+
+  for i in {1..10}
+  do
+    echo "running for $name with ID: $ID"
+    rm -rf $name report."$name"
+    ./build/release "$ID" &> report."$name"
+    ./get_timing.sh "$name" "ORI"
+  done
+
+  rm -rf $name
+  ./get_timing_avg.sh "$name" "ORI"
+done < matrix.ID.name_
+

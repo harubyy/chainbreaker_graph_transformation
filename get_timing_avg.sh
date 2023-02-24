@@ -18,5 +18,10 @@ else
   awk -F: '{sum += $2} END{avg=sum/10 ; print "avg. build matrix: " avg}' chrono.build_matrix >> chrono.avg."$1"
 fi
 
-[ -e file ] && rm chrono.build_DAG  chrono.build_matrix
-[ -e file ] && rm chrono.transform_DAG chrono.build_transformed_matrix
+# FAILS to erase these files, hence the results accumulates (we append on lines 6, 11, 14 and 17) 
+# this script is called in run_10 for each matrix
+#[ -e file ] && rm chrono.build_DAG  chrono.build_matrix
+#[ -e file ] && rm chrono.transform_DAG chrono.build_transformed_matrix
+rm chrono.build_DAG  chrono.build_matrix
+rm chrono.transform_DAG chrono.build_transformed_matrix
+
