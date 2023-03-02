@@ -1,0 +1,7 @@
+export LD_LIBRARY_PATH=/truba/home/buyilmaz/app/lib:/truba/home/buyilmaz/app/lib64:$LD_LIBRARY_PATH
+export PATH=/truba/home/buyilmaz/app/bin:$PATH
+module load centos7.3/comp/gcc/9.2
+source /truba/sw/centos7.9/comp/intel/oneapi-2022.2/setvars.sh intel64
+
+srun --account=proj18  --partition=hamsi --time=02:00:00 --nodes=1 --ntasks-per-node=28 --pty $shell
+
