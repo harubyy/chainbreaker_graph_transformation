@@ -1,4 +1,5 @@
 #include <ios>
+#include <iterator>
 #include <sys/time.h>
 #include <cstring>
 #include <vector>
@@ -14,49 +15,38 @@
 using namespace std;
 
 // writes runX.c
-void Rewrite::writeFunc(std::ofstream &stream, vector< vector<int> >& tracker, int size, int part, int maxNumOfThreads, int headerCounter) {
+void Rewrite::writeFunc(std::ofstream &stream, vector< vector<int> >& tracker, int size, int maxNumOfThreads, int headerCounter) {
   if(!stream.is_open())
-    std::cout << "Cannot open output file!\n";
+    std::cout << __LINE__ << " Cannot open output file!\n";
 
   vector<int>& partStarts   = tracker[0];
   vector<int>& threadCounts = tracker[1];
 
-/*  cout << "size: " << size << "\n";
-  cout << "tracker table:\n";
-  for(int i = 0; i < size ; i++)
-    cout << i << ": " << partStarts[i] << ", " << threadCounts[i] << "\n";
-  cout << "\n"; */
-
   stream << "#include \"calculators" + to_string(headerCounter) + ".h\"\n\n";
 
   int sign;
-  if((part+1) * TABLE_SIZE > signatureLevel.size())
-    sign = accumulate(signatureLevel.begin() + part * TABLE_SIZE, signatureLevel.end(), 0);
+  if((headerCounter+1) * TABLE_SIZE > signatureLevel.size())
+    sign = accumulate(signatureLevel.begin() + headerCounter * TABLE_SIZE, signatureLevel.end(), 0);
   else
-    sign = accumulate(signatureLevel.begin() + part * TABLE_SIZE, signatureLevel.begin() + ((part+1) * TABLE_SIZE), 0);
+    sign = accumulate(signatureLevel.begin() + headerCounter * TABLE_SIZE, signatureLevel.begin() + ((headerCounter+1) * TABLE_SIZE), 0);
   if(sign)
-    stream << "void run" << part << "(double* x, double* b, int* parents, double* values, int* rowPtr, int* rowIndices) {\n";
+    stream << "void run" << headerCounter << "(double* x, double* b, int* parents, double* values, int* rowPtr, int* rowIndices) {\n";
   else
-    stream << "void run" << part << "(double* x) {\n";
+    stream << "void run" << headerCounter << "(double* x) {\n";
 
   int counter = partStarts[0];
   if (maxNumOfThreads > 1)
     stream << "\n#pragma omp parallel num_threads(" << maxNumOfThreads << ")\n{\n";
 
-  int levelCounter = part * TABLE_SIZE;
-  int threadCounter = 0;
-  int mergeMark = 0, mergeBegin = 0, mergeCurrent = 0;
-//  cout << "size: " << size << "\n";
+  int levelCounter = headerCounter * TABLE_SIZE, threadCounter = 0;
   for(int j = 0 ; j < size ; j++) {
     if(threadCounts[j] > 1) {
       stream << "\n";
       stream << "  #pragma omp sections // " << j << ", " << to_string(threadCounts[j]) << "\n"
              << "  {\n";
 
- //     cout << "counter: " << counter << " threadCounts[j]: " << threadCounts[j] << " signature size: " << signature[levelCounter].size() << "\n";
       for(int i = counter ; i < counter+threadCounts[j] ; i++) {
         stream << "    #pragma omp section\n";
-  //      cout << "levelCounter: " << levelCounter << " threadCounter: " << threadCounter << "\n";
         if(signature[levelCounter][threadCounter] == 0)
           stream << "    { calculate" << i << "(x); }\n";
         else
@@ -66,29 +56,29 @@ void Rewrite::writeFunc(std::ofstream &stream, vector< vector<int> >& tracker, i
       }
       stream << "  }\n";
     } else {
-       if(!mergeBegin) {
-         mergeBegin = 1;
-         mergeMark = j;
-         mergeCurrent = j;
-
-         if(signature[levelCounter][0] == 0) {
-            stream << "  #pragma omp single\n"
-                   << "  calculate" << counter << "(x); \n";
-          } else {
-            stream << "  #pragma omp single\n"
-                   << "  calculate" << counter << "(x, b, parents, values, rowPtr, rowIndices); \n";
-          }
-
-         stream << "\n";
+       if(threadCounts[j] == 1) {
+        if(signature[levelCounter][threadCounter] == 0)
+         stream << "  #pragma omp single // " << j << "\n"
+                << "    { calculate" << counter << "(x); }\n";
+       else
+         stream << "  #pragma omp single // " << j << "\n"
+                << "    { calculate" << counter << "(x, b, parents, values, rowPtr, rowIndices); }\n";
+       } else {
+         auto it = mergedLevels.find(levelCounter);
+  
+         if(it != mergedLevels.end()) {
+           if((it->second)[1] == 1)
+             stream << "  #pragma omp single // " << j << "\n"
+                    << "  calculate" << counter << "(x); \n";
+           else
+             stream << "  #pragma omp single // " << j << "\n"
+                    << "  calculate" << counter << "(x, b, parents, values, rowPtr, rowIndices); \n";
+         }
        }
-
-       if(mergeBegin == 1 && j == (mergeCurrent + 1))
-         mergeCurrent = j; 
-
-        // toggle the flag for the last merged
-       if((mergeCurrent != j) || (mergeCurrent - mergeMark) == 9)
-         mergeBegin = 0;
+         
+       stream << "\n";
     }
+         
 
     counter += threadCounts[j];
     levelCounter++;
@@ -103,7 +93,6 @@ void Rewrite::writeFunc(std::ofstream &stream, vector< vector<int> >& tracker, i
   stream.close();
 }
 
-//void Rewrite::allocateMemory(std::ostream &stream, int numOfParts) {
 void Rewrite::writeMain(std::ostream &stream, int numOfParts, int parentsSize) {
   Part* L = matrixCSR->getL();
   int rows = L->getRows();
@@ -131,13 +120,10 @@ void Rewrite::writeMain(std::ostream &stream, int numOfParts, int parentsSize) {
             << "#define FILESIZE_VAL (PARENTS_SIZE * sizeof(double))\n"
             << "#define PARENTS_SIZE " +  to_string(parentsSize) + "\n\n"; 
    } else {
-     // just produce CSR format arrays for SYCL code
-     if(dumpCSR) {
        stream << "#define FILEPATH_PARENTS \"/tmp/" + fileName + "_parents_TR.bin\"\n"
               << "#define FILEPATH_ROWPTR \"/tmp/" + fileName + "_rowPtr_TR.bin\"\n"
               << "#define FILEPATH_VALUES \"/tmp/" + fileName + "_vals_TR.bin\"\n"
               << "#define PARENTS_SIZE " +  to_string(parentsSize) + "\n\n"; 
-     }
    }
  #else
    if(analyzer->getSingleLoopRows()) {
@@ -149,13 +135,10 @@ void Rewrite::writeMain(std::ostream &stream, int numOfParts, int parentsSize) {
             << "#define FILESIZE_ROWINDICES (" + to_string(rowIndices.size()) + " * sizeof(int))\n"
             << "#define PARENTS_SIZE " +  to_string(vals) + "\n\n"; 
    } else {
-     // just produce CSR format arrays for SYCL code
-     if(dumpCSR) {
        stream << "#define FILEPATH_PARENTS \"/tmp/" + fileName + "_parents.bin\"\n"
               << "#define FILEPATH_ROWPTR \"/tmp/" + fileName + "_rowPtr.bin\"\n"
               << "#define FILEPATH_VALUES \"/tmp/" + fileName + "_vals.bin\"\n"
               << "#define PARENTS_SIZE " +  to_string(vals) + "\n\n"; 
-     }
    }
  #endif
 
@@ -264,9 +247,9 @@ void Rewrite::writeMain(std::ostream &stream, int numOfParts, int parentsSize) {
 
   stream << "  int errCnt = 0;\n"
          << "  for (int i = 0; i < " << (L->getRows()-1) << " ; i++) {\n"
-         << "    if(((fabs(1.0000000000 - x[i])/1.0000000000) >= 1e-2) && fabs(x[i]) >= 0) {\n"
+         << "    if(((fabs(1.000000 - x[i])/1.000000) >= 1e-2) && fabs(x[i]) >= 0) {\n"
          << "      errCnt++;\n"
-         << "      printf(\"x[%d]: %.5f\\n\",i,x[i]);\n"
+         << "      //printf(\"x[%d]: %.5f\\n\",i,x[i]);\n"
          << "    }\n"
          << "  }\n\n";
 
@@ -296,7 +279,7 @@ void Rewrite::writeMain(std::ostream &stream, int numOfParts, int parentsSize) {
 void Rewrite::writeUtil() {
   std::ofstream stream(fileName + "/util.h");
   if(!stream.is_open())
-    std::cout << "Cannot open output file!\n";
+    std::cout << __LINE__ << " Cannot open output file!\n";
 
   stream << "#include <sys/types.h>\n"
          << "#include <sys/stat.h>\n"
@@ -328,272 +311,275 @@ void Rewrite::writeUtil() {
 }
 
 #ifdef REWRITE_ENABLED
-int Rewrite::rewriteRow(int row, vector<double> &b, string& currRow, int rewriteDepth) {
-  int flops = 0;
-
-  DAG& dag = analyzer->getDAG();
-  vector<vector<double>>& values = analyzer->getValues();
-  vector<double>& rowValues = values[row];
-
-  vector<int>& parents = rewritingStrategy->isRewritten(row) ? rewritingStrategy->getInitialParentsOf(row) : dag[row].first;
-
-  if(parents.empty()) {
-    if(rewriteDepth == REWRITE_DEPTH)
-      currRow.append("x[" + to_string(row) + "]");
-    else {
-      //currRow.append("b[" + to_string(row) + "] / " + to_string(rowValues.back()));
-      currRow.append(to_string(b[row]) + " / " + to_string(rowValues.back()));
-      flops++;
-    }
-  } else {
-    currRow += "((" + to_string(b[row]) + " - (";
-    flops++;
-    for(int j = 0 ; j < parents.size() ; j++) {
-      flops++;
-      if(rewriteDepth == REWRITE_DEPTH) {
-        currRow += to_string(rowValues[j]) + "*x[" + to_string(parents[j]) + "]";
-      } else {
-        currRow += to_string(rowValues[j]) + "*(";
-        flops += rewriteRow(parents[j], b, currRow, rewriteDepth+1);
-        currRow += string(")");
-      }
-
-      if(j != parents.size() - 1) {
-        currRow += string(" + ");
-        flops++;
-      }
-    }
-
-    currRow.append(string(")) / ") + to_string(rowValues.back()) + ")");
-    flops++;
-  }
-
-  //cout << "row: " << row << " added " << flops << "\n";
-  return flops;
-}
-
-int Rewrite::dumpString(int row, stringstream& currRow, set<int>& rewritten, map<int,double>& multipliers) {
-  int flops = (multipliers.size() << 1);
-
-//  cout << "dumpString multipliers[-1]: " << multipliers[-1] << "\nmultipliers size: " << multipliers.size() << "\n";
-  currRow << multipliers[-1];
-  multipliers.erase(-1);
-
-  for(auto it = multipliers.begin() ; it != multipliers.end(); it++)
-    if(rewritten.find(it->first) == rewritten.end()) {
-      currRow << " - " << it->second <<  " * x[" << it->first <<  "]";
-    }
-
-  currRow << ";\n";
-//  cout << "generated string: " << currRow << "\n";
-
-  return flops;
-}
-
-// doesnt need to return flops
-// put -1 as key for constant to multipliers
-// map<int,double> multipliers;  // the constant will have the key -1
+// when calling: put -1 as key for constant to multipliers
 // rewritingMultiplicant is 1 (this is for rewritten)
 // sign: + is true, - is false
-void Rewrite::rewriteRow2(int row, vector<double> &b, set<int>& rewritten, map<int,double>& multipliers, double rewritingMultiplicant, bool sign) {
-
+void Rewrite::calculateMultiplicants(int row, vector<double> &b, set<int>& rewritten, map<int,double>& multipliers, double rewritingMultiplicant, bool sign) {
   DAG& dag = analyzer->getDAG();
-  vector<vector<double>>& values = analyzer->getValues();
-  vector<double>& rowValues = values[row];
+  map<int, vector<int>>& oriParents = analyzer->getOriParents();
+  vector<int>& parents = oriParents[row];
 
-  vector<int>& parents = rewritingStrategy->isRewritten(row) ? rewritingStrategy->getInitialParentsOf(row) : dag[row].first;
+  map<int, vector<double>>& oriRowValues = analyzer->getOriRowValues();
+  vector<double>& rowValues = oriRowValues[row];
 
-  /*cout.fixed;
-  cout.precision(10);
-  if(row == 5) cout << "(0) row: " << row << " rewritingMultiplicant: " << rewritingMultiplicant <<  " sign: " << (int)sign << "\n"; */
   if(!parents.empty()) {
     for(int j = 0 ; j < parents.size() ; j++) {
       auto it = rewritten.find(parents[j]);
       if(it != rewritten.end()) {
-//        if(row == 5) cout << fixed << setprecision(10) << "(1) rewritten row: " << parents[j] << " rowValues[" << j << "]: " << rowValues[j] << " rowValues.back(): " << rowValues.back() << "\n";
-        rewriteRow2(parents[j], b, rewritten, multipliers, rewritingMultiplicant * (rowValues[j] / rowValues.back()), !sign);
+  /*      if(parents[j] == 0 || parents[j] == 1 || parents[j] == 2 || parents[j] == 3) {
+          cout << __LINE__ << " rewriting " << parents[j] << "\n";
+          cout << "sign:" << !sign << "\nrewritingMultiplicant: " << rewritingMultiplicant << " * rowValues[" << j << "] (which is " << rowValues[j] << ") /" << rowValues.back() << " : " << rewritingMultiplicant * rowValues[j] /rowValues.back() << "\n";
+        }*/
+        calculateMultiplicants(parents[j], b, rewritten, multipliers, rewritingMultiplicant * (rowValues[j] / rowValues.back()), !sign);  
       } else {
-  //if(row == 5)      cout << fixed << setprecision(10) << "(2) sign: " << sign << " rowValues[" << j  << "]: " << rowValues[j] << " rowValues.back(): " << rowValues.back() <<  " for x" << parents[j] << ": " << rewritingMultiplicant * (rowValues[j] /rowValues.back()) << "\n"; 
-//        if(multipliers.find(parents[j]) != multipliers.end())
-          if(sign == true) {
-    //if(row == 5)       cout << " (3) adding to multipliers[" << parents[j] << "]: " << multipliers[parents[j]] << "\n";
-           multipliers[parents[j]] +=  rewritingMultiplicant * (rowValues[j] /rowValues.back());
-          } else {
-      //if(row == 5)     cout << " (4) removing from multipliers[" << parents[j] << "]: " << multipliers[parents[j]] << "\n";
-           multipliers[parents[j]] -=  rewritingMultiplicant * (rowValues[j] /rowValues.back());
-          }
-  //      else
-    //      multipliers[parents[j]] = rewritingMultiplicant * (rowValues[j] /rowValues.back());
+   /*     if(parents[j] == 0 || parents[j] == 1 || parents[j] == 2 || parents[j] == 3) 
+          cout << __LINE__ << " sign:" << sign << " multiplicant[" << parents[j] << "] get (+/-):" <<  "\nrewritingMultiplicant: " << rewritingMultiplicant << " * rowValues[" << j << "] (which is " << rowValues[j] << ") /" << rowValues.back() << " : " << rewritingMultiplicant * rowValues[j] /rowValues.back() << "\n";*/
+        if(sign == true)
+          multipliers[parents[j]] +=  rewritingMultiplicant * (rowValues[j] /rowValues.back());
+        else 
+          multipliers[parents[j]] -=  rewritingMultiplicant * (rowValues[j] /rowValues.back());
       }
     }
-  
-//if(row == 5)    cout << fixed << setprecision(10) << " (5) sign: " << sign << " b[" <<  row << "] (" << b[row] << ") / " << rowValues.back()  << "  rowValues.back() to the constant slot\n\n";
-//if(row == 5)    cout << "row: " << row << " (6) rewritingMultiplicant: " << rewritingMultiplicant << "\n";
+
+/*    if(row == 3 || row == 0 || row == 1 || row == 2 || row == 4)
+      cout << __LINE__ << " sign:" << sign << " multiplicant[-1] get (+/-):" <<  "\nrewritingMultiplicant: " << rewritingMultiplicant << " * b[" << row << "] (which is " << b[row] << ") /" << rowValues.back() << " : " << rewritingMultiplicant * (b[row] / rowValues.back()) << "\n"; */
+
     if(sign == true)
       multipliers[-1] += rewritingMultiplicant * (b[row] / rowValues.back());
     else
       multipliers[-1] -= rewritingMultiplicant * (b[row] / rowValues.back());
-  } else { // parents empty means I rewritten to level 0.
-//if(row == 5)    cout << "(7) row: " << row << " rewritingMultiplicant: " << rewritingMultiplicant << " sign: " << sign << "\n";
-//if(row == 5)    cout << fixed << setprecision(10) << "setting b[" << row << "]: " << b[row] << " / rowValues.back(): " << rowValues.back() << " for x" << row << "\n\n";
+  } else { // parents empty (rewriting to level 0)
+/*        if(row == 3 || row == 0 || row == 1 || row == 2 || row == 4)
+          cout << __LINE__ << " sign:" << sign << " multiplicant[-1] get (+/-):" <<  "\nrewritingMultiplicant: " << rewritingMultiplicant << " * b[" << row << "] (which is " << b[row] << ") /" << rowValues.back() << " : " << rewritingMultiplicant * (b[row] / rowValues.back()) << "\n";*/
+
     if(sign == true)
       multipliers[-1] += rewritingMultiplicant * (b[row] / rowValues.back());
     else
       multipliers[-1] -= rewritingMultiplicant * (b[row] / rowValues.back());
   }
 
-//if(row == 5)  cout << fixed << setprecision(10) << "(8) multipliers[-1]: " << multipliers[-1] << "\n";
+/*    cout << "multipliers:\n";
+    for(auto& multip : multipliers)
+      cout << multip.first << ": " << multip.second << "\n";
+    cout << "\n";
+  }
+*/
 }
 
-int Rewrite::rewriteRow(int row, vector<double> &b, string& currRow, set<int>& rewritten) {
-  int flops = 0;
-
+void Rewrite::updateRewrittenRow(int row, vector<double>& b, set<int>& rewritten, map<int,double>& multipliers) {
   DAG& dag = analyzer->getDAG();
   vector<vector<double>>& values = analyzer->getValues();
   vector<double>& rowValues = values[row];
+  vector<int>& parents = dag[row].first;
 
-  vector<int>& parents = rewritingStrategy->isRewritten(row) ? rewritingStrategy->getInitialParentsOf(row) : dag[row].first;
+  b[row] = multipliers[-1];
+  multipliers.erase(-1);
+  parents.clear();
+  rowValues.clear();
 
-  if(parents.empty()) {
-    auto it = rewritten.find(row);
-    if(it == rewritten.end())
-      currRow.append("x[" + to_string(row) + "]");
-    else {
-      //currRow.append("b[" + to_string(row) + "] / " + to_string(rowValues.back()));
-      //currRow.append(to_string(b[row]) + " / " + to_string(rowValues.back()));
-      currRow.append(to_string(b[row] / rowValues.back()));
-      flops++;
-    }
-  } else {
-    auto it = rewritten.find(row);
-    if(it == rewritten.end())
-      currRow.append("x[" + to_string(row) + "]");
-    else {
-      //currRow += "((b[" + to_string(row) + "] - (";
-      currRow += "((" + to_string(b[row]) + " - (";
-      flops++;
-      for(int j = 0 ; j < parents.size() ; j++) {
-        flops++;
-        auto it = rewritten.find(parents[j]);
-        if(it != rewritten.end()) {
-            currRow += to_string(rowValues[j]) + "*(";
-     //       cout << "calling for parent " << parents[j] << "\n";
-            flops += rewriteRow(parents[j], b, currRow, rewritten);
-            currRow += string(")");
-        } else
-            currRow += to_string(rowValues[j]) + "*x[" + to_string(parents[j]) + "]";
-  
-        if(j != parents.size() - 1) {
-          currRow += string(" + ");
-          flops++;
-        }
-      }
-  
-      currRow.append(string(")) / ") + to_string(rowValues.back()) + ")");
-      flops++;
+  for(auto it = multipliers.begin() ; it != multipliers.end(); it++) {
+    if(rewritten.find(it->first) == rewritten.end()) {
+      parents.push_back(it->first);
+      rowValues.push_back(it->second);
     }
   }
 
-  return flops;
+  // now itself will be 1.00 since rowValues come as divided by this value anyway (Lx = b)
+  rowValues.push_back(1.00);
+
+  if(parents.empty())
+    b[row] = 1.00;
 }
 
-// rewrite the whole level
-int Rewrite::rewriteLevel(int level, vector<double> &b, string& currRow, std::ostream &stream) {
+#endif
+
+void Rewrite::dumpLoop(int beginIndex, int endIndex, vector<int>& loopedRows, std::ofstream& stream) {
+  if(endIndex-beginIndex > 1) {
+    stream << "  for(int i = " << beginIndex << " ; i < " << endIndex << "; i++) {\n"
+           << "    int row = rowIndices[i];\n";
+  } else // single looped row
+    stream << "    { int row = " << loopedRows[0] << ";\n";
+
+  stream << "      double xi = 0;\n"
+         << "      for (int j = rowPtr[row]; j < rowPtr[row+1]-1; j++)\n"
+         << "        xi += values[j] * x[parents[j]];\n\n"
+         << "      x[row] = (b[row]-xi)/values[rowPtr[row+1]-1]; }\n\n";
+}
+
+int Rewrite::dumpUnrolled(vector<int>& unrolledRows, vector<double>& b, std::ofstream& stream) {
   int flops = 0;
   DAG& dag = analyzer->getDAG();
   vector<vector<double>>& values = analyzer->getValues();
-  vector<vector<int>>& levelTable = analyzer->getLevelTable();
-
-  for(auto& row : levelTable[level]) {
-    set<int>& rewritten = rewritingStrategy->getRewritingMapOf(row);
-    //int row = level[i];
+ 
+  for(auto& row : unrolledRows) {
     vector<int>& parents = dag[row].first;
     vector<double>& rowValues = values[row];
 
+//    cout << "row: " << row << " num. parents: " << parents.size() << "\n";
+    if(!parents.empty()) {
+      flops += (parents.size() << 1) + 1;
+      #ifdef REWRITE_ENABLED
+        if(rewritingStrategy->isRewritten(row)) flops--;
+      #endif
+    }
+
     if(parents.empty()) {
-      stream << "  x[" << row << "] = " << b[row] << " / " << rowValues.back() << ";\n";
-      flops++;
-      continue;
+      #ifdef REWRITE_ENABLED
+        if(rewritingStrategy->isRewritten(row))
+          //stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = " << b[row] << ";\n";
+          stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = " << rowValues.back() << ";\n";
+        else
+      #endif
+        stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = " << b[row] / rowValues.back() << ";\n";
+    } else if(parents.size() == 1) {
+      #ifdef REWRITE_ENABLED
+        if(rewritingStrategy->isRewritten(row))
+          stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = " << b[row] << " - " << rowValues[0] << " * x[" << parents[0] << "];\n";
+        else
+      #endif
+          stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = (" << b[row] << " - " << rowValues[0] << " * x[" << parents[0] << "])/" << rowValues.back() << ";\n";
+    } else if(parents.size() == 2) {
+      #ifdef REWRITE_ENABLED
+        if(rewritingStrategy->isRewritten(row)) {
+          stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = " << b[row] << "-(" \
+                 << rowValues[0] << " * x[" << parents[0] << "] + " \
+                 << rowValues[1] << " * x[" << parents[1] << "]);\n";
+        } else
+      #endif
+          stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = (" << b[row] << "-(" \
+                 << rowValues[0] << " * x[" << parents[0] << "] + " \
+                 << rowValues[1] << " * x[" << parents[1] << "]))/" << rowValues.back() << ";\n";
+    } else if(parents.size() == 3) {
+      #ifdef REWRITE_ENABLED
+        if(rewritingStrategy->isRewritten(row)) {
+          stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = " << b[row] << "-(" \
+                 << rowValues[0] << " * x[" << parents[0] << "] + " \
+                 << rowValues[1] << " * x[" << parents[1] << "] +" \
+                 << rowValues[2] << " * x[" << parents[2] << "]);\n";
+        } else
+      #endif
+          stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = (" << b[row] << "-(" \
+                 << rowValues[0] << " * x[" << parents[0] << "] + " \
+                 << rowValues[1] << " * x[" << parents[1] << "] + " \
+                 << rowValues[2] << " * x[" << parents[2] << "]))/" << rowValues.back() << ";\n";
+    } else if(parents.size() == 4) {
+      #ifdef REWRITE_ENABLED
+        if(rewritingStrategy->isRewritten(row)) {
+          stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = " << b[row] << "-(" \
+                 << rowValues[0] << " * x[" << parents[0] << "] +" \
+                 << rowValues[1] << " * x[" << parents[1] << "] +" \
+                 << rowValues[2] << " * x[" << parents[2] << "] +" \
+                 << rowValues[3] << " * x[" << parents[3] << "]);\n";
+        } else
+      #endif
+          stream << std::fixed << std::setprecision(6) << "  x[" << row << "] = (" << b[row] << "-(" \
+                 << rowValues[0] << " * x[" << parents[0] << "] +" \
+                 << rowValues[1] << " * x[" << parents[1] << "] +" \
+                 << rowValues[2] << " * x[" << parents[2] << "] +" \
+                 << rowValues[3] << " * x[" << parents[3] << "]))/" << rowValues.back() << ";\n";
     }
-
-    ToBeRewritten& toBeRewritten = rewritingStrategy->getToBeRewritten();
-    int* levels = analyzer->getLevels();
-
-    stream << "  x[" << row << "] = (" << b[row] << " - (";
-    flops++;
-
-    string currRow;
-    vector<int>& initialParents = rewritingStrategy->getInitialParentsOf(row);
-    for(int j = 0 ; j < initialParents.size() ; j++) {
-      currRow += to_string(rowValues[j]) + "*";
-      flops++;
-
-      if(rewritingStrategy->isScopeSelective()) {
-        set<int>& rewritten = rewritingStrategy->getRewritingMapOf(row);
-        flops += rewriteRow(initialParents[j], b, currRow, rewritten);
-      } else
-        flops += rewriteRow(initialParents[j], b, currRow, 0);
-
-      if(j != initialParents.size() - 1) {
-        currRow += string(" + ");
-        flops++;
-      }
-    }
-
-    stream << currRow;
-    stream << ")) / " << rowValues.back() << ";\n";
-    flops++;
-   // flops += rewriteRow(row, b, currRow, targetLevel);
   }
 
+  stream << "\n";
   return flops;
+}
+
+#ifdef REWRITE_ENABLED
+void Rewrite::rewriteInLoop(vector<int>& loopedRows, vector<double> &b) {
+  int flops = 0; double total_time = 0.0;
+  DAG& dag = analyzer->getDAG();
+
+  vector<int>::iterator it = loopedRows.begin();
+  while(it != loopedRows.end()) {
+      if(rewritingStrategy->isRewritten(*it)) {
+        rewriteRow(*it, b);
+      }
+    it++;
+  }
 }
 #endif
 
-/*int Rewrite::writeLevel(vector<int>& level) {
-  vector<int>& rowPtrL =  matrixCSR->getL()->getRowPtr();
-  // TODO: these will be string to stream except for level.size()
-  #pragma omp parallel for schedule(static)
-  for(int i = 0 ; i < level.size() ; i++) {
-      // we'll denote mmaped rowValues and flatData as
-      //                     values    and parents
-      stream << "  double x" << row << " = 0;\n"
-             << "  for(int j = " << rowPtrL[row] << "; j < " << (rowPtrL[row + 1] - 1) << " ; j++)\n"
-             << "    x" << row << " += values[j] * x_r[parents[j]];\n\n"; 
-      stream << "  x_w[" << row << "] = (b[" << row << "]-x" << row << ")/values[" << (rowPtrL[row + 1]-1) << "];\n\n";
-  
-      flops += ((rowPtrL[row + 1] - rowPtrL[row] - 1) << 1) + 1;
-  }
-}*/
-
-int Rewrite::writePart(int levelNum, int rowStartIndex, int rowEndIndex, int levelPart, vector<double> &b, std::ofstream& stream, int merged, int* sigType) {
-  int flops = 0;
+int Rewrite::writePart(int levelNum, int rowStartIndex, int rowEndIndex, int levelPart, vector<double> &b, std::ofstream& stream, int signDump, int* sigType) {
+  int flops = 0, beginLevel, endLevel, loopEnd, loopBegin = rowIndices.size();
+  bool loopedRowsExist = false;
 
   vector<vector<int>>& levelTable = analyzer->getLevelTable();
   vector<int>& level = levelTable[levelNum];
+  vector<int> unrolledRows, loopedRows;
+      
+  if(levelLookUp.find(levelNum) != levelLookUp.end()) {
+    beginLevel = levelLookUp[levelNum];
+    endLevel = mergedLevels[beginLevel][2];
 
-  DAG& dag = analyzer->getDAG();
-  vector<vector<double>>& values = analyzer->getValues();
+    int prev = -1;
+    list<int> removedLevels;
+    for(int i = beginLevel; i <= endLevel; i++) {
+      list<vector<int>>& loopedUnrolled = mergedLevelsDist[i];
 
-  vector<int>& rowPtrL =  matrixCSR->getL()->getRowPtr();
+      #ifdef REWRITE_ENABLED
+        ch_start = std::chrono::steady_clock::now();
+          rewriteInLoop(loopedUnrolled.front(), b);  // loopedRows
+        ch_end = std::chrono::steady_clock::now();
+        ch_ttime += (ch_end-ch_start);
+      #endif
+      analyzer->separateRows(loopedUnrolled.front(), loopedUnrolled.back());
 
-  stream.precision(5);
+      if(!loopedUnrolled.front().empty()) {
+        loopedRowsExist = true;
+        rowIndices.insert(rowIndices.end(), loopedUnrolled.front().begin(), loopedUnrolled.front().end());
+      }
 
-  vector<int> unrolledRows;
-  vector<int> loopedRows(level.begin() + rowStartIndex, level.begin() + rowEndIndex);
-  #ifdef REWRITE_ENABLED
-    // TODO: this is not efficient, construct rewritten rows per level from the beginning
-    vector<int> rewrittenRows;
-  #endif
+      // found prev: loops exist AND no unrolled
+      if(prev == -1 && !loopedUnrolled.front().empty() && loopedUnrolled.back().empty()) {
+        prev = i;
+        // update the ending level since 
+        mergedLevels[beginLevel][2] = prev;
+      }
 
-  analyzer->separateRows(levelNum, rowStartIndex, rowEndIndex, loopedRows, unrolledRows);
- 
-  if(!loopedRows.empty()) {
-  //if(loopedRows.size() > 1) {
-    /*cout << "level: " << levelNum << " startIndex: " << rowStartIndex << " endIndex: " << rowEndIndex << "\n";
-    for(auto& row : loopedRows)
-      cout << row << ", ";
-    cout << "\n";*/
+      // merge loops to prev level's loops if there's no prev unrolled
+      if(prev > -1 && prev < i && !loopedUnrolled.front().empty()) {
+        list<vector<int>>& prevLoopedUnrolled = mergedLevelsDist[prev];
+
+        vector<int>& ref = loopedUnrolled.front();   // curr loops
+        vector<int> loopsMerged(prevLoopedUnrolled.front());        // new vector out of prev loops since cannot resize
+
+        loopsMerged.insert(loopsMerged.end(), ref.begin(), ref.end());
+
+        prevLoopedUnrolled.begin()->clear();
+        prevLoopedUnrolled.erase(prevLoopedUnrolled.begin());  // remove old prev level loops & insert extended one
+        prevLoopedUnrolled.push_front(loopsMerged);
+        ref.clear();
+
+        if(!loopedUnrolled.back().empty())
+          prev = -1;
+
+        if(loopedUnrolled.front().empty() && loopedUnrolled.back().empty())
+          removedLevels.push_back(i);
+      }
+    }
+
+    for(auto& level: removedLevels)
+      mergedLevelsDist.erase(level);
+
+  } else {
+    loopedRows.insert(loopedRows.begin(), level.begin() + rowStartIndex, level.begin() + rowEndIndex);
+
+    #ifdef REWRITE_ENABLED
+      ch_start = std::chrono::steady_clock::now();
+        rewriteInLoop(loopedRows, b);
+      ch_end = std::chrono::steady_clock::now();
+      ch_ttime += (ch_end-ch_start);
+    #endif
+    analyzer->separateRows(loopedRows, unrolledRows);
+
+    if(!loopedRows.empty()) {
+      loopedRowsExist = true;
+      rowIndices.insert(rowIndices.end(), loopedRows.begin(), loopedRows.end());
+    }
+  }
+
+  if(loopedRowsExist) {
+      analyzer->setSingleLoopRows(true);
 
     if(rowStartIndex == 0) {
       signatureLevel.push_back(1);
@@ -601,23 +587,20 @@ int Rewrite::writePart(int levelNum, int rowStartIndex, int rowEndIndex, int lev
     } else
       signatureLevel[levelNum] = 1;
 
+    // update signature of starting merged level if its signature is type 1
+    if(signDump != 0) {
+      if(mergedLevels.find(beginLevel) != mergedLevels.end()) {
+        if(mergedLevels[beginLevel][1] == 1)
+          mergedLevels[beginLevel][1] = 2;
+      }
+    }
+
     signature[levelNum].push_back(1);  // if we OR signature[levelNum] == signatureLevel[levelNum]
 
-    // remove rewritten rows from loopedRows, fill in rewrittenRows
-    vector<int>::iterator it = loopedRows.begin();
-    while(it != loopedRows.end()) {
-      #ifdef REWRITE_ENABLED
-        if(rewritingStrategy->isRewritten(*it)) {
-          rewrittenRows.push_back(*it);
-          it = loopedRows.erase(it);
-        } else {
-      #endif
-        flops += ((dag[*it].first.size()) << 1) + 1;
-        it++;
-      #ifdef REWRITE_ENABLED
-       }
-      #endif
-    }
+    *sigType = 2;
+    if(signDump == 2)  // beginning of single-threaded OR multi-threaded level
+      stream << "  void calculate" << levelPart << "(double* x, double* b, int* parents, double* values, int* rowPtr, int* rowIndices) {\n";
+
   } else {
     if(rowStartIndex == 0) {
       signatureLevel.push_back(0);
@@ -625,181 +608,87 @@ int Rewrite::writePart(int levelNum, int rowStartIndex, int rowEndIndex, int lev
     }
       
     signature[levelNum].push_back(0);
-  }
 
-  #ifdef REWRITE_ENABLED
-    if(!unrolledRows.empty()) {
-      // remove rewritten rows from unrolledRows, fill in rewrittenRows
-      vector<int>::iterator it = unrolledRows.begin();
-      while(it != unrolledRows.end()) {
-        if(rewritingStrategy->isRewritten(*it)) {
-          rewrittenRows.push_back(*it);
-          it = unrolledRows.erase(it);
-        } else
-          it++;
-      }
-    }
-  #endif
-
-  rowIndices.insert(rowIndices.end(), loopedRows.begin(), loopedRows.end());
-  vector<int>& currLevelStartIndex = startIndex[levelNum];
-  if(currLevelStartIndex.empty()) // this will work even if loopedRows is empty since start & end will be the same for the loop
-    currLevelStartIndex.push_back(startIndex[levelNum-1].back() + loopedRows.size());
-  else
-    currLevelStartIndex.push_back(currLevelStartIndex.back() + loopedRows.size());
-
-  /*cout << "rowIndices:\n";
-  for(auto& index : rowIndices)
-    cout << index << ", ";
-  cout << "\n";*/
-
-
-  if(!loopedRows.empty()) {
-    //if(merged && *sigType == 1)
-      *sigType = 2;
-
-    // TODO: we actually can remove rowIndices from loopedRows with size == 1. That'll complicate things though.
-    if(!merged)
-      stream << "void calculate" << levelPart << "(double* x, double* b, int* parents, double* values, int* rowPtr, int* rowIndices) {\n";
-
-    if(loopedRows.size() > 1) {
-      if(currLevelStartIndex.size() == 1)
-        stream << "  for(int i = " << startIndex[levelNum-1].back() << " ; i < " << currLevelStartIndex.back() << " ; i++) {\n";
-      else
-        stream << "  for(int i = " << currLevelStartIndex[currLevelStartIndex.size()-2] << " ; i < " << currLevelStartIndex.back() << " ; i++) {\n";
-
-      stream << "    int row = rowIndices[i];\n";
-    } else
-        stream << "    int row = " << loopedRows[0] << ";\n";
-          
-    stream << "    double xi = 0;\n"
-           << "    for (int j = rowPtr[row]; j < rowPtr[row+1]-1; j++)\n"
-           << "      xi += values[j] * x[parents[j]];\n\n"
-           << "    x[row] = (b[row]-xi)/values[rowPtr[row+1]-1];\n";
-
-    if(loopedRows.size() > 1)
-      stream << "  }\n\n";
-  }
-
-  if(!unrolledRows.empty()) {
- //   if(loopedRows.empty())
-    if(loopedRows.empty() && !merged) {
+    if(signDump == 2)  // beginning of single-threaded OR multi-threaded level
       stream << "  void calculate" << levelPart << "(double* x) {\n";
-      stream << "//void calculate" << levelPart << "(double* x, double* b, int* parents, double* values, int* rowPtr, int* rowIndices) {\n";
-    }
-
-    for(auto& row : unrolledRows) {
-
-      vector<int>& parents = dag[row].first;
-      vector<double>& rowValues = values[row];
-
-      if(parents.empty()) {
-  //      stream << setprecision(10) << "  x[" << row << "] = " << b[row] / rowValues.back() << ";\n";
-        stream << std::scientific << "  x[" << row << "] = " << b[row] / rowValues.back() << ";\n";
-        flops++;
-      } else if(parents.size() == 1) {
-        stream << std::scientific << "  x[" << row << "] = (" << b[row] << "-(" << rowValues[0] << ") * x[" << parents[0] << "])/" << rowValues.back() << ";\n";
-        flops+= 3;
-      } else if(parents.size() == 2) {
-        stream << std::scientific << "  x[" << row << "] = (" << b[row] << "-((" \
-               << rowValues[0] << ") * x[" << parents[0] << "]+(" \
-               << rowValues[1] << ") * x[" << parents[1] << "]))/" << rowValues.back() << ";\n";
-        flops+= 5;
-      } else if(parents.size() == 3) {
-        stream << std::scientific << "  x[" << row << "] = (" << b[row] << "-((" \
-               << rowValues[0] << ") * x[" << parents[0] << "]+(" \
-               << rowValues[1] << ") * x[" << parents[1] << "]+(" \
-               << rowValues[2] << ") * x[" << parents[2] << "]))/" << rowValues.back() << ";\n";
-        flops+= 7;
-      } else if(parents.size() == 4) {
-        stream << std::scientific << "  x[" << row << "] = (" << b[row] << "-((" \
-               << rowValues[0] << ") * x[" << parents[0] << "]+(" \
-               << rowValues[1] << ") * x[" << parents[1] << "]+(" \
-               << rowValues[2] << ") * x[" << parents[2] << "]+(" \
-               << rowValues[3] << ") * x[" << parents[3] << "]))/" << rowValues.back() << ";\n";
-        flops+= 9;
-      }
-    }
   }
 
-  #ifdef REWRITE_ENABLED
-  if(!rewrittenRows.empty()) {
-    if(loopedRows.empty() && unrolledRows.empty())
-      if(!merged) {
-        stream << "  void calculate" << levelPart << "(double* x) {\n";
-        stream << "//void calculate" << levelPart << "(double* x, double* b, int* parents, double* values, int* rowPtr, int* rowIndices) {\n";
-      }
-    }
+  ch_start2 = std::chrono::steady_clock::now();
 
-    ToBeRewritten& toBeRewritten = rewritingStrategy->getToBeRewritten();
-    int* levels = analyzer->getLevels();
+  int index = 0;
+  if(levelLookUp.find(levelNum) != levelLookUp.end()) {
+    endLevel = mergedLevels[beginLevel][2];
+    map<int, list<vector<int>>>::iterator it = mergedLevelsDist.find(beginLevel);
+    for(; it != mergedLevelsDist.end(); ++it) {
+      int i = it->first; // get the level
+      list<vector<int>>& loopedUnrolled = mergedLevelsDist[i];
 
-//    cout << "# of rewritten rows: " << rewrittenRows.size() << "\n";
-    for(auto& row : rewrittenRows) {
-      if(!rewritingStrategy->isRewritten(row))
-        cout << "row: " << row << " doesnt appear in rewrittenStrategy's list\n"; 
-
-      vector<int>& parents = dag[row].first;
-      stream << "  x[" << row << "] = ";
-
-      vector<int>& initialParents = rewritingStrategy->getInitialParentsOf(row);
-      set<int>& rewritten = rewritingStrategy->getRewritingMapOf(row);
-      map<int,double> multipliers;
-      for(auto& row : rewritten)
-        multipliers[row] = 0;
-      multipliers[-1] = 0;
-      double rewritingMultiplicant = 1;
-
-      rewriteRow2(row, b, rewritten, multipliers, rewritingMultiplicant, true);
-    
-  auto t9 = std::chrono::steady_clock::now();
-      // get updated matrix values for rewritten rows
-      rewrittenB[row] = multipliers[-1];
-
-      rewrittenRowParents[row] = vector<int>();
-      rewrittenRowValues[row] = vector<double>();
-      vector<double>& rewrittenValues = rewrittenRowValues[row];
-      vector<int>& rewrittenParents = rewrittenRowParents[row];
-  auto t10 = std::chrono::steady_clock::now();
-  cout << " chrono updated values: " << std::chrono::duration_cast<std::chrono::duration<double>>(t10 - t9).count()*1000 << "\n";
-
-      stringstream currRow;
-
-      flops += dumpString(row, currRow, rewritten, multipliers);
-      stream << currRow.str();
-    
-/*      ToBeRewritten& toBeRewritten = rewritingStrategy->getToBeRewritten();
-      cout << "multipliers size: " << multipliers.size() << "\n";
-      cout << "rewriting distance: " << toBeRewritten[row].second - toBeRewritten[row].first << "\n";*/
-   t9 = std::chrono::steady_clock::now();
-      for(auto it = multipliers.begin() ; it != multipliers.end(); it++) {
-        if(rewritten.find(it->first) == rewritten.end()) {
-          rewrittenValues.push_back(it->second);
-          rewrittenParents.push_back(it->first);
-        }
+      if(!loopedUnrolled.front().empty()) {
+        loopEnd = loopBegin + loopedUnrolled.front().size();
+        dumpLoop(loopBegin, loopEnd, loopedUnrolled.front(), stream);
+        loopBegin = loopEnd;
+     
+        if(levelNum > 0)
+          flops += analyzer->recalculateFLOPSFor(loopedUnrolled.front());
       }
 
-  t10 = std::chrono::steady_clock::now();
-  cout << " chrono updated values: " << std::chrono::duration_cast<std::chrono::duration<double>>(t10 - t9).count()*1000 << "\n";
-    }
-  #endif
+      if(!loopedUnrolled.back().empty())
+        flops += dumpUnrolled(loopedUnrolled.back(), b, stream);
 
-  if(!merged)
-    stream << "}\n\n";
+      if(i == endLevel)
+        break;
+    }
+  } else { 
+
+    if(loopedRowsExist) {
+      loopEnd = loopBegin + loopedRows.size();
+      dumpLoop(loopBegin, loopEnd, loopedRows, stream);
+      loopBegin = loopEnd;
+        
+      if(levelNum > 0)
+        flops += analyzer->recalculateFLOPSFor(loopedRows);
+    }
+
+    if(!unrolledRows.empty())
+      flops += dumpUnrolled(unrolledRows, b, stream);
+  }
+  
+  stream << "}\n\n";
+
+  ch_end2 = std::chrono::steady_clock::now();
+  ch_ttime2 += (ch_end2 - ch_start2);
 
   return flops;
 }
 
+#ifdef REWRITE_ENABLED
+void Rewrite::rewriteRow(int row, vector<double>& b) {
+    if(!rewritingStrategy->isRewritten(row))
+      cout << "row: " << row << " doesnt appear in rewrittenStrategy's list\n"; 
+
+    set<int>& rewritten = rewritingStrategy->getRewritingMapOf(row);
+    map<int,double> multipliers;
+    for(auto& row : rewritten)
+      multipliers[row] = 0;
+    multipliers[-1] = 0;
+    double rewritingMultiplicant = 1;
+
+    calculateMultiplicants(row, b, rewritten, multipliers, rewritingMultiplicant, true);
+    updateRewrittenRow(row, b, rewritten, multipliers);
+}
+#endif
+
 int Rewrite::writeMakefile(int execBlockCnt) {
   std::ofstream stream(fileName + "/Makefile");
   if(!stream.is_open()) {
-    std::cout << "Cannot open output file!\n";
+    std::cout << __LINE__ << " Cannot open output file!\n";
     return -1;
   }
 
   stream << "CXX      := clang\n"
   //<< "CXXFLAGS := -O3 -ffast-math -funroll-loops -march=native -I/kuacc/apps/llvm-omp/include\n"
-  << "CXXFLAGS := -O3 -flto=thin -ffast-math -march=native \n"
+ // << "CXXFLAGS := -O3 -flto=thin -ffast-math -march=native \n"
+  << "CXXFLAGS := -O3 -flto=thin  -march=native -fopenmp\n"
   << "LDFLAGS  := -fopenmp\n"
   << "SRC      := $(wildcard calculate*.c)\n"
   << "OBJECTS  := $(SRC:%.c=%.o)\n"
@@ -820,25 +709,41 @@ int Rewrite::writeMakefile(int execBlockCnt) {
   return 0;
 }
 
-int Rewrite::writeHeader(int headerCounter, int partCounterStart, int partCounterEnd) {
+int Rewrite::writeHeader(int headerCounter, int partCounterStart, int partCounterEnd, vector<int>& threadCounts) {
   std::ofstream stream(fileName + "/calculators" + to_string(headerCounter) + ".h");
   if(!stream.is_open()) {
-    std::cout << "Cannot open output file!\n";
+    std::cout << __LINE__ << " Cannot open output file!\n";
     return -1;
   }
 
-  int startingLevel = headerCounter * TABLE_SIZE;
-  int counter = 0;
+  int levelCounter = headerCounter * TABLE_SIZE;
+
+  // if all signatures of a level are consumed, current level is finished
+  // the latter counts in threadCounts, levelCounter doesn't start @0
+  int counter = 0, cntLevelStart = 0;
+
   stream << "#pragma once\n";
   for(int i = partCounterStart; i < partCounterEnd; i++) {
-    if(signature[startingLevel][counter] == 0)
-      stream << "void calculate" << to_string(i) << "(double* x);\n";
-    else
-      stream << "void calculate" << to_string(i) << "(double* x, double* b, int* parents, double* values, int* rowPtr, int* rowIndices);\n";
+     if(threadCounts[cntLevelStart] >= 1) {
+        if(signature[levelCounter][counter] == 0)
+          stream << "void calculate" << to_string(i) << "(double* x);\n";
+        else
+          stream << "void calculate" << to_string(i) << "(double* x, double* b, int* parents, double* values, int* rowPtr, int* rowIndices);\n";
+     } else {
+       auto it = mergedLevels.find(levelCounter);
+
+       if(it != mergedLevels.end())
+        if((it->second)[1] == 1)
+          stream << "void calculate" << to_string(i) << "(double* x);\n";
+        else
+          stream << "void calculate" << to_string(i) << "(double* x, double* b, int* parents, double* values, int* rowPtr, int* rowIndices);\n";
+     }
 
     counter++;
-    if(counter == signature[startingLevel].size()) {
-      startingLevel++;
+
+    if(counter == signature[levelCounter].size()) {
+      levelCounter++;
+      cntLevelStart++;
       counter = 0;
     }
   }
@@ -852,14 +757,11 @@ int Rewrite::balanceLevel(int toBeBalanced, int& workloadPerThread) {
     workloadPerThread = toBeBalanced+NUM_THREADS-1;
     workloadPerThread /= NUM_THREADS;
 
- //     cout << "toBeBalanced size: " << toBeBalanced << "\n";
     if(workloadPerThread < LOWER_BOUND) {
       numThreads = toBeBalanced+LOWER_BOUND-1;
       numThreads /= LOWER_BOUND;
       workloadPerThread = toBeBalanced+numThreads-1;
       workloadPerThread /= numThreads;
- //       cout << "updated numThreads: " << numThreads << "\n";
- //       cout << "updated workloadPerThread: " << workloadPerThread << "\n";
     } else
       numThreads = (const int)ceil((double)(toBeBalanced/workloadPerThread));
 
@@ -884,7 +786,6 @@ int Rewrite::balanceRows(vector<int>& level) {
 
   // TODO: optimize for levels with all rows with same length: use BALANCE_ROWS for these
   // TODO: refactor this section
-
   cout << "\nnum of rows in level " << j << " : " << level.size() << "\n";
   cout << "flopsPerLevel: " << flopsPerLevel[j] << "\n";
 
@@ -1179,18 +1080,6 @@ double Rewrite::balanceRowsCV(vector<int>& level, vector<int>& rowDist, vector<i
       start = end-1;
     }
 
-/*    cout << "new start: " << start << " new end: " << end << "\n";
-
-    cout << "rowDist:\n";
-    for(auto& i : rowDist)
-      cout << i << ", ";
-    cout << "\n";
-
-    cout << "rowDistSum:\n";
-    for(auto& i : rowDistSum)
-      cout << i << ", ";
-    cout << "\n";*/
-
     //while(end <= level.size()) {
     while(start < level.size()) {
       advanceTillBinLimit(level, start, end, binLimit);
@@ -1218,187 +1107,321 @@ double Rewrite::balanceRowsCV(vector<int>& level, vector<int>& rowDist, vector<i
   cout << totalCVAfter << "\n";
   return totalCVAfter;
 }
-
-void Rewrite::reduceNumOfRows(vector<int>& level, vector<int>& rowDistReduced, vector<int>& rowDistSumReduced) {
-  int partitionSize = (int)(ceil((double)level.size() / NUM_THREADS));
-  int i = 0;
-
-/*  cout << "reduceNumOfRows: levels \n";
-  for(auto& i : level)
-    cout << i << ", ";
-  cout << "\n";
-
-  cout << "partitionSize: " << partitionSize << "\n";*/
-  while((i + partitionSize) < level.size()) {
-    int sum = accumulate(level.begin()+i, level.begin()+i+partitionSize, 0);
-    
-    rowDistSumReduced.push_back(sum);
-    rowDistReduced.push_back(partitionSize);
-    i += partitionSize;
-  }
-
-  if(level.size()-i >= 1) {
-    int sum = accumulate(level.begin()+i, level.end(), 0);
-    rowDistSumReduced.push_back(sum);
-    rowDistReduced.push_back(level.size()-i);
-  }
-
-/*  cout << "rowDistReduced:\n";
-  for(auto& i : rowDistReduced)
-    cout << i << ", ";
-  cout << "\n";
-
-  cout << "rowDistSumReduced:\n";
-  for(auto& i : rowDistSumReduced)
-    cout << i << ", ";
-  cout << "\n";*/
-}
 #endif
 
-int Rewrite::rewriteExecutor(vector<double> &b, vector<double> &x) {
+void Rewrite::mergeSingleThreadedLevels() {
+  vector<vector<int>>& levelTable = analyzer->getLevelTable();
+  auto& flopsPerLevel = analyzer->getFlopsPerLevel();
+  int* levels = analyzer->getLevels();
+  int numThreads = 1, workloadPerThread = 1;
+  vector<int> emptyLevels;
+
+  for(int i = 0 ; i < flopsPerLevel.size()-1; i++) { // cannot merge the last level
+    vector<int>& level = levelTable[i];
+          
+    int numThreads = (level.size() > 1) ? balanceLevel(level.size(), workloadPerThread) : 1;
+    if(numThreads == 1) {
+      if(mergedLevels.find(i) == mergedLevels.end()) {
+        mergedLevels[i] = vector<int>(3, 0);
+        mergedLevels[i][0] = flopsPerLevel[i];   // total cost
+        mergedLevels[i][1] = 1;   // default to short type sig
+        mergedLevels[i][2] = -1;  // ending level
+
+        if(mergedLevels.size() == 1)
+          levelLookUp[i] = i;   // new starting level # (after erasing empty levels it changes)
+
+        mergedLevelsDist[i] = list<vector<int>>();
+        vector<int>& level = levelTable[i];
+        list<vector<int>>& loopedUnrolled = mergedLevelsDist[i];
+        vector<int> rows(level.begin(), level.end());
+        loopedUnrolled.push_back(rows);
+        loopedUnrolled.push_back(vector<int>());
+
+        int currLevel = i+1;
+        while(currLevel < flopsPerLevel.size()) {
+          vector<int>& level = levelTable[currLevel];
+          numThreads = (level.size() > 1) ? balanceLevel(level.size(), workloadPerThread) : 1;
+          vector<int>& currMerged = mergedLevels[i];
+
+          // these are the regions that rewriting method couldnt be applied,
+          // hence we fall back to the traditional sptrsv even without the levels
+          // the classical looped calculation + unrolling
+          if(numThreads == 1) { // merge consecutive single threaded levels until multi-threaded one is reached
+            vector<int>& levelBegin = levelTable[i];
+            vector<int>& levelEnd = levelTable[currLevel];
+            for(auto& row : levelEnd)
+              levels[row] = i;
+
+            levelBegin.insert(levelBegin.end(),levelEnd.begin(),levelEnd.end());
+            
+            currMerged[0] += flopsPerLevel[currLevel];
+            emptyLevels.push_back(currLevel);
+
+            list<vector<int>>& loopedUnrolled = mergedLevelsDist[currLevel];
+            vector<int> rows(level.begin(), level.end());
+            loopedUnrolled.push_back(rows);
+            loopedUnrolled.push_back(vector<int>());
+
+            currLevel++;
+
+            // NOT USED: MERGE_DEPTH (default 10) is reached or last level merged
+            //if((currLevel == i + MERGE_DEPTH) || (currLevel == flopsPerLevel.size())) {
+            if((currMerged[0] >= analyzer->getALC()) || (currLevel == flopsPerLevel.size())) {
+              currMerged[2] = currLevel-1;
+              flopsPerLevel[i] = currMerged[0];
+
+              // update new starting level
+              if(mergedLevels.size() > 1) {
+                map<int, vector<int>>::reverse_iterator rit = mergedLevels.rbegin(); rit++;
+                int start = rit->first;  // 0
+                int end = (rit->second)[2]; // 455
+                int newStartLevel = levelLookUp.rbegin()->first + (i - end);
+                levelLookUp[newStartLevel] = i;
+              }
+
+              break;
+            }
+          } else { // multi-threaded level encountered
+            if(currLevel != i+1) { 
+              currMerged[2] = currLevel-1;
+              currLevel++;
+              flopsPerLevel[i] = currMerged[0];
+
+              // update new starting level
+              if(mergedLevels.size() > 1) {
+                map<int, vector<int>>::reverse_iterator rit = mergedLevels.rbegin(); rit++;
+                int start = rit->first;  // 0
+                int end = (rit->second)[2]; // 455
+                int newStartLevel = levelLookUp.rbegin()->first + (i - end);
+                levelLookUp[newStartLevel] = i;
+              }
+            } 
+            // we found only 1 single-threaded level:
+            // starting & ending levels are the same: REMOVE IT
+            else {
+              mergedLevels[i].clear();
+              mergedLevels.erase(i);
+              mergedLevelsDist.erase(i);
+              levelLookUp.erase(i);
+            }
+
+            break; 
+          }
+        } // while
+
+        i = currLevel-1;
+      }
+    } // numThreads == 1
+  }
+
+  // needed since emptyLevels are erased using updateWithEmptyLevels()
+  reverse(emptyLevels.begin(), emptyLevels.end());
+  analyzer->updateWithEmptyLevels(emptyLevels);
+
+  #ifdef REPORT
+    cout << "empty levels:\n";
+    for(auto& i : emptyLevels)
+      cout << i << ", ";
+    cout << "\n";
+
+    cout << "\nmergedLevels:\n";
+    for(map<int,vector<int>>::iterator iter = mergedLevels.begin(); iter != mergedLevels.end(); iter++) {
+      vector<int>& ref = iter->second;
+      cout << "starting level: " << iter->first << "\nending level: " << ref[2] << "\n\n";
+    }
+
+  cout << "\n\nmergedLevelsDist:\n";
+  for(map<int,list<vector<int>>>::iterator iter = mergedLevelsDist.begin(); iter != mergedLevelsDist.end(); iter++) {
+    list<vector<int>>& ref = iter->second;
+    cout << "level: " << iter->first << "\n";
+
+    cout << "looped rows: " << ref.front().size() << "\n";
+    for(auto& row : ref.front())
+      cout << row << ", ";
+    cout << "\nunrolled rows: " << ref.back().size() << "\n";
+    for(auto& row : ref.back())
+      cout << row << ", ";
+    cout << "\n";
+  }
+  #endif
+}
+
+int Rewrite::rewriteExecutor(vector<double> &b) {
   Part *L = matrixCSR->getL();
+  analyzer->setSingleLoopRows(false);
   writeUtil();
 
   vector<vector<int>>& levelTable = analyzer->getLevelTable();
   auto& flopsPerLevel = analyzer->getFlopsPerLevel();
+  int partCounter = 0, headerCounter = 0, partCounterStart = 0, maxNumOfThreads = 1;
 
-  for(int i = 0 ; i < flopsPerLevel.size(); i++)
-    startIndex.push_back(vector<int>());
-  startIndex[0].push_back(0);
+  mergeSingleThreadedLevels();
 
-  int rowStartIndex = 0;
-  int partCounter = 0;
-  int headerCounter = 0;
-  int partCounterStart = 0;
+  // Tracker keeps start of each part(tracker[0]) & num of thread(tracker[1]), part: workload of a thread
+  vector< vector<int> > tracker(2, vector<int>(TABLE_SIZE,0));
 
-  int maxNumOfThreads = 1;
+  double chrono_par = 0.0, chrono_serial = 0.0;
 
-  // Tracker keeps start of each part & num of threads
-  // part: workload of a thread
-  vector< vector<int> > tracker;
-  for(int i = 0 ; i < 2; i++)
-    tracker.push_back(vector<int>(TABLE_SIZE,0));
+  #ifdef PAR
+  // parallel file generation (runX.c, calculatorsX.h)
+  // define num of threads to be used so that each get a TABLE_SIZE, max num of threads can be NUM_THREADS
+  int parFileGenThreadNum = flopsPerLevel.size()/TABLE_SIZE + ((flopsPerLevel.size() % TABLE_SIZE) > 0);
 
-//  #pragma omp parallel for private(rowStartIndex) schedule(static)
+  //printf("flopsPerLevel.size(): %d, parFileGenThreadNum:%d\n", flopsPerLevel.size(), parFileGenThreadNum);
 
-  // assign only 1 thread to level 0. Thread creating overhead is too much for such
-  // easy & fast computation
-  int flops = 0;
- // cout << "level: " << 0 << "\n";
-    #ifdef BALANCE_ROWS
-      std::ofstream streamZero(fileName + "/calculate" + to_string(partCounter) + ".c");
-      if(!streamZero.is_open())
-        std::cout << "Cannot open output file!\n";
+  int th_cnt = 0, numParts = parFileGenThreadNum;
+  int* partCounterStarts = NULL, *sizes = NULL, *parts = NULL;
+  map<int, vector<vector<int>> >* trackerAll = NULL;
 
-      int flopsBefore = flops;
-      int sig = 1;
-      flops += writePart(0, 0, levelTable[0].size(), partCounter++, b, streamZero, 0, &sig);
-      streamZero.close();
-    #endif
-
-  vector<int>& partStarts =   tracker[0];
-  vector<int>& threadCounts = tracker[1];
-  partStarts[0] = partCounter-1;
-  threadCounts[0] = 1;
-
-  int size = (0 == flopsPerLevel.size()-1) ? (flopsPerLevel.size() % TABLE_SIZE) : TABLE_SIZE; 
-
-  if((0 == (TABLE_SIZE-1)) || (0 == flopsPerLevel.size()-1)) {
- //   cout << "j: " << 0 << " part: " << 0 << "\n"; 
-    std::ofstream stream(fileName + "/run0.c");
-    writeHeader(0, 0, 1);
-    writeFunc(stream, tracker, size, 0, 1, headerCounter);
+  auto t_start = std::chrono::steady_clock::now();
+  if(parFileGenThreadNum > 1) {
+    partCounterStarts = (int*) malloc((parFileGenThreadNum + 1) * sizeof(int));
+    sizes = (int*)malloc(parFileGenThreadNum * sizeof(int));
+    partCounterStarts[0] = 0;
+    trackerAll = new map<int, vector<vector<int>> >();
   }
 
-  int prevSingleThreadCnt = 0, merged = 0, sigType = 1; // type1 : short one, type2: long one
-  int prevPartCounter;
-  for(int j = 1 ; j < flopsPerLevel.size(); j++) {
-    int numThreads = NUM_THREADS;
-    int workloadPerThread;
+  auto t_end = std::chrono::steady_clock::now();
+  chrono_par += std::chrono::duration<double>(t_end - t_start).count();
+
+  if(parFileGenThreadNum > NUM_THREADS) 
+    parFileGenThreadNum = NUM_THREADS;
+  #endif
+
+  int sigType = 1; // type1 : short one, type2: long one
+  for(int j = 0 ; j < flopsPerLevel.size(); j++) {
+  int numThreads = 1, workloadPerThread = 1, flops = 0;
     vector<int>& level = levelTable[j];
     vector<int> flopsLevel;
-    int flops = 0;
 
     #ifdef BALANCE_ROWS
-      numThreads = balanceLevel(level.size(), workloadPerThread);
+      numThreads = (levelLookUp.find(j) == levelLookUp.end()) ?  balanceLevel(level.size(), workloadPerThread): 1;
+      #ifdef REPORT
+        cout << "level " << j << " numThreads: " << numThreads << "\n";
+      #endif
     #endif
-
-    // new single threaded level found, if prev. level is also single threaded, merge
-    if(numThreads == 1)
-      prevSingleThreadCnt++;
-
-    // merging finished before 10 files
-    if((numThreads > 1) && (merged == 1) && (prevSingleThreadCnt < 10)) {
-      closeParanthesis(fileName, prevPartCounter, sigType);
-
-      prevSingleThreadCnt = merged = 0;
-      sigType = 1;
-    }
-
-    if(prevSingleThreadCnt == 1)
-      prevPartCounter = partCounter;
-
-    if(prevSingleThreadCnt == 2) {
-      cout << "prevPartCounter: " << prevPartCounter << " partCounter: " << partCounter << "\n";
-      removeParanthesis(fileName, prevPartCounter);
-    }
-
+      
     if(numThreads > maxNumOfThreads)
       maxNumOfThreads = numThreads;
 
-    int workloadCounter = 0;
-//    cout << "level: " << j << "\n";
-//    cout << "num threads: " << numThreads << "\n";
     #ifdef BALANCE_ROWS
-      std::ofstream streamLevel;
+    std::ofstream streamLevel;
+    streamLevel.open(fileName + "/calculate" + to_string(partCounter) + ".c");
 
-      if(prevSingleThreadCnt >= 2 &&  prevSingleThreadCnt <= 10) { // write into prev file
-        cout << "prevPartCounter: " << prevPartCounter << " partCounter: " << partCounter << "\n";
-        streamLevel.open(fileName + "/calculate" + to_string(prevPartCounter) + ".c", std::ofstream::app);
-        merged = 1;
-      } else
-        streamLevel.open(fileName + "/calculate" + to_string(partCounter) + ".c");
+    if(!streamLevel.is_open())
+      std::cout << __LINE__ << " Cannot open output file!\n";
 
-      if(!streamLevel.is_open())
-        std::cout << "Cannot open output file!\n";
-
-      for(int i = 0; i < numThreads-1; i++) {
-        int flopsBefore = flops;
-        flops += writePart(j, i*workloadPerThread, i*workloadPerThread+workloadPerThread, partCounter++, b, streamLevel, merged, &sigType);
-    }
+    // merged = 0 (not merged), =1 (merged), =2 (merged but beginning level)
+    if(levelLookUp.find(j) != levelLookUp.end()) {
+      //flops += writePart(0, 0, level.size(), partCounter++, b, streamLevel, 2, &sigType);
+      flopsPerLevel[j] = writePart(j, 0, level.size(), partCounter++, b, streamLevel, 2, &sigType);
+    } else {
+      if(numThreads == 1) // single threaded 1 level (not merged)
+        flopsPerLevel[j] = writePart(j, 0, level.size(), partCounter++, b, streamLevel, 2, &sigType);
+      else { 
+        flops += writePart(j, 0, workloadPerThread, partCounter++, b, streamLevel, 2, &sigType);
+        for(int i = 1; i < numThreads-1; i++) {
+          flops += writePart(j, i * workloadPerThread, (i+1) * workloadPerThread, partCounter++, b, streamLevel, 2, &sigType);
+        }
     
-      int flopsBefore = flops;
-      flops += writePart(j, (numThreads-1)*workloadPerThread, level.size(), partCounter++, b, streamLevel, merged, &sigType);
-
-      streamLevel.close();
-
-      if(prevSingleThreadCnt == 10) { // merge is done. Wait for a new opportunity
-        closeParanthesis(fileName, prevPartCounter, sigType);
-
-        prevSingleThreadCnt = merged = 0;
-        sigType = 1;
+        flops += writePart(j, (numThreads-1) * workloadPerThread, level.size(), partCounter++, b, streamLevel, 2, &sigType);
+        flopsPerLevel[j] = flops;
       }
-    #endif
+    }
 
-//    cout << " part counter became: " << partCounter << "\n";;
+    streamLevel.close();
+    #endif
+      
     vector<int>& partStarts =   tracker[0];
     vector<int>& threadCounts = tracker[1];
     partStarts[(j % TABLE_SIZE)] = partCounter-numThreads;
     threadCounts[(j % TABLE_SIZE)] = numThreads;
 
-    int size = (j == flopsPerLevel.size()-1) ? (flopsPerLevel.size() % TABLE_SIZE) : TABLE_SIZE; 
-
-    if(((j % TABLE_SIZE) == (TABLE_SIZE-1)) || (j == flopsPerLevel.size()-1)) {
-      int part = floor((((double)j)/TABLE_SIZE));
-   //   cout << "j: " << j << " part: " << part << "\n"; 
-      std::ofstream stream(fileName + "/run" + to_string(part) + ".c");
-      writeHeader(headerCounter, partCounterStart, partCounter);
-      writeFunc(stream, tracker, size, part, maxNumOfThreads, headerCounter);
-      headerCounter++;
-      partCounterStart = partCounter;
+    #ifdef PAR
+    if(parFileGenThreadNum > 1) {
+//      printf("line: %d j: %d num of levels: %d\n", __LINE__, j, flopsPerLevel.size());
+      auto t15 = std::chrono::steady_clock::now();
+      if(((j % TABLE_SIZE) == (TABLE_SIZE-1)) || (j == flopsPerLevel.size()-1)) {
+        partCounterStarts[th_cnt+1] = partCounter;
+        sizes[th_cnt] = (j == flopsPerLevel.size()-1) ? (flopsPerLevel.size() % TABLE_SIZE) : TABLE_SIZE;
+        vector<vector<int>> tckr(tracker);
+        (*trackerAll)[th_cnt] = tckr;
+        th_cnt++;
+      } 
+      auto t16 = std::chrono::steady_clock::now();
+      chrono_par += std::chrono::duration<double>(t16 - t15).count();
+    } else {
+    #endif
+      auto t13 = std::chrono::steady_clock::now();
+      int size = (j == flopsPerLevel.size()-1) ? (flopsPerLevel.size() % TABLE_SIZE) : TABLE_SIZE; 
+  
+      if(((j % TABLE_SIZE) == (TABLE_SIZE-1)) || (j == flopsPerLevel.size()-1)) {
+        std::ofstream stream(fileName + "/run" + to_string(headerCounter) + ".c");
+        writeHeader(headerCounter, partCounterStart, partCounter, threadCounts);
+ //       printf("SINGLE: size:%d, part:%d, headCounter:%d\n", size, part, headerCounter);
+        writeFunc(stream, tracker, size, maxNumOfThreads, headerCounter);
+        headerCounter++;
+        partCounterStart = partCounter;
+      }
+    
+      auto t14 = std::chrono::steady_clock::now();
+      chrono_serial += std::chrono::duration<double>(t14 - t13).count();
+    #ifdef PAR
     }
+    #endif
   }
 
+  #ifdef PAR
+  auto t11 = std::chrono::steady_clock::now();
+  if(parFileGenThreadNum > 1) {
+    #pragma omp parallel for schedule(static,2) num_threads(parFileGenThreadNum)
+    for(int i = 0; i < numParts; i++) {
+      writeHeader(i, partCounterStarts[i], partCounterStarts[i+1], tracker[1]);
+      std::ofstream stream(fileName + "/run" + to_string(i) + ".c");
+      writeFunc(stream, (*trackerAll)[i], sizes[i], maxNumOfThreads, i);
+    }
+
+    free(sizes); free(partCounterStarts); delete trackerAll;
+    sizes = NULL; partCounterStarts = NULL;
+  }
+  
+  auto t12 = std::chrono::steady_clock::now();
+  chrono_par += std::chrono::duration<double>(t12 - t11).count();
+
+  if(parFileGenThreadNum > 1)
+    cout << "* chrono dump runX.c calculatorsX.h: " << chrono_par * 1000 << "\n";
+  else
+ #endif
+    cout << "chrono dump runX.c calculatorsX.h: " << chrono_serial * 1000 << "\n";
+
+  #ifdef REPORT
+    cout << "lookup table:\n";
+    for(auto& item : levelLookUp)
+      cout << item.first << ": " << item.second << "\n";
+  
+    cout << "leveltable, flopsPerLevel size: " << levelTable.size() << ", " << flopsPerLevel.size() << " NumOfLevels:" << analyzer->getNumOfLevels() << "\n";
+  
+    cout << "\nmergedLevels:\n";
+    for(map<int,vector<int>>::iterator iter = mergedLevels.begin(); iter != mergedLevels.end(); iter++) {
+      vector<int>& ref = iter->second;
+      cout << "starting level: " << iter->first << "\nending level: " << ref[2] << "\n\n";
+    }
+
+  /*cout << "\n\nmergedLevelsDist:\n";
+  for(map<int,list<vector<int>>>::iterator iter = mergedLevelsDist.begin(); iter != mergedLevelsDist.end(); iter++) {
+    list<vector<int>>& ref = iter->second;
+    cout << "level: " << iter->first << "\n";
+
+    cout << "looped rows: " << ref.front().size() << "\n";
+    for(auto& row : ref.front())
+      cout << row << ", ";
+    cout << "\nunrolled rows: " << ref.back().size() << "\n";
+    for(auto& row : ref.back())
+      cout << row << ", ";
+    cout << "\n";
+  }*/
+  #endif
+  
   return 0;
 }
 
@@ -1414,12 +1437,12 @@ int Rewrite::rewrite() {
   struct timeval t1{}, t2{};
   
   if(rows != cols) {
-    printf("This is not a square matrix.n");
+    printf("This is not a square matrix.\n");
     return -1;
   }
 
-  vector<double> xRef(cols, 1);
-  vector<double> b(cols, 0);
+  vector<double> xRef(cols, 1.000000);
+  vector<double> b(cols, 0.000000);
   
   DAG& dag = analyzer->getDAG();
   vector<vector<double>>& values = analyzer->getValues();
@@ -1427,47 +1450,82 @@ int Rewrite::rewrite() {
   Part* LCSR = matrixCSR->getL();
 
   /////////////////////////////// PRINT SOME BASIC STATS ///////////////////////////////
-  cout << "NUM_THREADS:" << NUM_THREADS << "\n";
-  cout << "LOWER_BOUND: " << LOWER_BOUND << "\n";
-  #ifdef BALANCE_ROWS
-    cout << "BALANCE METHOD: BALANCE_ROWS\n";
-  #else
-    cout << "BALANCE METHOD: BALANCE_ROWS_CV\n";
+  #ifdef REPORT
+    cout << "NUM_THREADS:" << NUM_THREADS << "\n";
+    cout << "LOWER_BOUND: " << LOWER_BOUND << "\n";
+    #ifdef BALANCE_ROWS
+      cout << "BALANCE METHOD: BALANCE_ROWS\n";
+    #else
+      cout << "BALANCE METHOD: BALANCE_ROWS_CV\n";
+    #endif
+    cout << "TABLE_SIZE: " << TABLE_SIZE << "\n";
   #endif
-  cout << "TABLE_SIZE: " << TABLE_SIZE << "\n";
   /////////////////////////////// PRINT SOME BASIC STATS ///////////////////////////////
 
   auto t5 = std::chrono::steady_clock::now();
   // fill in the B values, these are needed for writePart
   // B values for rewritten rows will be filled in by writePart
-  for(int i = 0; i < rows; i++) {
-    #ifdef REWRITE_ENABLED
-      vector<int>& parents = rewritingStrategy->isRewritten(i) ? rewritingStrategy->getInitialParentsOf(i) : dag[i].first;
-    #else
-      vector<int>& parents = dag[i].first;
-    #endif
+ 
+  #ifdef REWRITE_ENABLED
+    map<int, vector<int>>& oriParents = analyzer->getOriParents();
+    map<int, vector<double>>& oriRowValues = analyzer->getOriRowValues();
+  #endif
 
+  #ifdef PAR
+  #pragma omp parallel for num_threads(NUM_THREADS)
+  #endif
+  for(int i = 0; i < rows; i++) {
+  #ifdef REWRITE_ENABLED
+    vector<int>& parents = oriParents[i];
+    vector<double>& rowValues = oriRowValues[i];
+  #else
+    vector<int>& parents = dag[i].first;
     vector<double>& rowValues = values[i];
+  #endif
 
     b[i] += rowValues.back() * xRef[i];
-    for(int j = 0 ; j < parents.size() ; j++)
+    for(int j = 0 ; j < parents.size() ; j++) {
       b[i] += rowValues[j] * xRef[parents[j]];
+    }
   }
-  auto t6 = std::chrono::steady_clock::now();
-  cout << "chrono calculate B: " << std::chrono::duration_cast<std::chrono::duration<double>>(t6 - t5).count()*1000 << "\n";
 
-  vector<double> x(cols, 0);
-  rewriteExecutor(b, x);
-  
+
+  auto t6 = std::chrono::steady_clock::now();
+  #ifdef PAR
+  cout << "* chrono calculate B: " << chrono::duration<double>(t6 - t5).count()*1000 << "\n";
+  #else
+  cout << "chrono calculate B: " << chrono::duration<double>(t6 - t5).count()*1000 << "\n";
+  #endif
+
+  // VERIFICATION OF XREF
+//  cout << "VERIFICATION BEFORE\n";
+//  verifyX(rows, dag, values, b, xRef);
+
+  ch_ttime = std::chrono::duration<double>(0); 
+  ch_ttime2 = std::chrono::duration<double>(0); 
+  auto start = std::chrono::steady_clock::now();
+  rewriteExecutor(b);
+  auto end = std::chrono::steady_clock::now();
+#ifdef REWRITE_ENABLED
+  cout << "chrono rewrite: " << ch_ttime.count()*1000 << "\n";
+#endif
+  cout << "chrono calculate rewriteExecutor: " << chrono::duration<double>(end-start).count()*1000 << "\n";
+  cout << "chrono dump calculateX.c: " << ch_ttime2.count()*1000 << "\n";
+
   int parentsSize = dumpDataToMem(b);
   auto& flopsPerLevel = analyzer->getFlopsPerLevel();
+
+  start = std::chrono::steady_clock::now();
   std::ofstream stream(fileName + "/main.c");
   if(!stream.is_open())
-    std::cout << "Cannot open output file!\n";
+    std::cout << __LINE__ << " Cannot open output file!\n";
+
   writeMain(stream, (int)(ceil((((double)flopsPerLevel.size())/TABLE_SIZE))), parentsSize);
   stream.close();
     
   writeMakefile(analyzer->getNumOfLevels());
+  end = std::chrono::steady_clock::now();
+  cout << "chrono dump main & makefile: " << chrono::duration<double>(end-start).count()*1000 << "\n";
 
   return 0;
 }
@@ -1476,79 +1534,113 @@ int Rewrite::dumpDataToMem(vector<double>& b) {
   auto t7 = std::chrono::steady_clock::now();
 
   Part* LCSR = matrixCSR->getL();
-  string extension(".bin");
-  string extension_TR("_TR.bin");
-
-  string pathVals ("/tmp/" + fileName + "_vals");
-  string pathParents ("/tmp/" + fileName + "_parents");
-  string pathRowPtr ("/tmp/" + fileName + "_rowPtr");
-
   int returnVal = 0;
 
-  // dumpCSR is enabled so that we use external lib
-  if(analyzer->getSingleLoopRows()) {
-    string pathB ("/tmp/" + fileName + "_b");
-    string pathRowIndices ("/tmp/" + fileName + "_rowIndices");
+  #ifdef REWRITE_ENABLED
+    string pathVals_TR ("/tmp/" + fileName + "_vals_TR.bin");
+    string pathParents_TR ("/tmp/" + fileName + "_parents_TR.bin");
+    string pathRowPtr_TR ("/tmp/" + fileName + "_rowPtr_TR.bin");
 
-    #ifdef REWRITE_ENABLED
-      vector<int> transformedRowPtr, transformedColIdx;
-      vector<double> transformedValues;
-      buildTransformedMatrix(transformedRowPtr, transformedColIdx, transformedValues);
-      returnVal = transformedValues.size();
+    vector<int> transformedRowPtr, transformedColIdx;
+    vector<double> transformedValues;
+    buildTransformedMatrix(transformedRowPtr, transformedColIdx, transformedValues);
+    returnVal = transformedValues.size();
+    
+    // if loops exist
+    if(analyzer->getSingleLoopRows()) {
+      string pathB ("/tmp/" + fileName + "_b_TR.bin");
+      string pathRowIndices ("/tmp/" + fileName + "_rowIndices_TR.bin");
 
-      // TODO: cant we update them in writePart? do we need to accumulate?
-      for(auto& row : rewrittenB)
-        b[row.first] = row.second;
+      #ifdef PAR
+      #pragma omp parallel sections num_threads(2)
+      {
+        #pragma omp section
+        { dumpToMem(b, pathB.c_str(), LCSR->getRows()-1); }
 
-      dumpToMem(b, pathB.append(extension_TR).c_str(), LCSR->getRows()-1);
-      dumpToMem(transformedValues, pathVals.append(extension_TR).c_str(), transformedValues.size());
-      dumpToMem(transformedRowPtr, pathRowPtr.append(extension_TR).c_str(), transformedRowPtr.size());
-      dumpToMem(transformedColIdx, pathParents.append(extension_TR).c_str(), transformedColIdx.size());
-      dumpToMem(rowIndices, pathRowIndices.append(extension_TR).c_str(), rowIndices.size());
-
-      // do we want the original matrix in addition for SYCL code?
-      if(dumpCSR) {
-        dumpToMem(b, pathB.append(extension).c_str(), LCSR->getRows()-1);
-        dumpToMem(LCSR->getVals(), pathVals.append(extension).c_str(), LCSR->getNNZs());
-        dumpToMem(LCSR->getRowPtr(), pathRowPtr.append(extension).c_str(), LCSR->getRowPtr().size());
-        dumpToMem(LCSR->getColIdx(), pathParents.append(extension).c_str(), LCSR->getColIdx().size());
-        dumpToMem(rowIndices, pathRowIndices.append(extension).c_str(), rowIndices.size());
+        #pragma omp section
+        { dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size()); }
       }
-    #else
-      dumpToMem(b, pathB.append(extension).c_str(), LCSR->getRows()-1);
-      dumpToMem(LCSR->getVals(), pathVals.append(extension).c_str(), LCSR->getNNZs());
-      dumpToMem(LCSR->getRowPtr(), pathRowPtr.append(extension).c_str(), LCSR->getRowPtr().size());
-      dumpToMem(LCSR->getColIdx(), pathParents.append(extension).c_str(), LCSR->getColIdx().size());
-      dumpToMem(rowIndices, pathRowIndices.append(extension).c_str(), rowIndices.size());
+      #else
+        dumpToMem(b, pathB.c_str(), LCSR->getRows()-1);
+        dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size());
+      #endif
 
-      cout << "Matrix dimensions:\n";
-      cout << "rowPtr: " << LCSR->getRowPtr().size() << "\n";
-      cout << "colIdx: " << LCSR->getColIdx().size() << "\n";
-      cout << "values: " << LCSR->getVals().size() << "\n";
+    }
+
+    #ifdef PAR
+    #pragma omp parallel sections num_threads(3)
+    {
+      #pragma omp section
+      { dumpToMem(transformedValues, pathVals_TR.c_str(), transformedValues.size());    }
+
+      #pragma omp section
+      { dumpToMem(transformedRowPtr, pathRowPtr_TR.c_str(), transformedRowPtr.size());  }
+
+      #pragma omp section
+      { dumpToMem(transformedColIdx, pathParents_TR.c_str(), transformedColIdx.size()); }
+    }
+    #else
+      dumpToMem(transformedValues, pathVals_TR.c_str(), transformedValues.size());
+      dumpToMem(transformedRowPtr, pathRowPtr_TR.c_str(), transformedRowPtr.size());
+      dumpToMem(transformedColIdx, pathParents_TR.c_str(), transformedColIdx.size());
     #endif
-  } else if(dumpCSR) {
-    // dump CSR format array for external lib code
-    dumpToMem(LCSR->getVals(), pathVals.c_str(), LCSR->getNNZs());
-    dumpToMem(LCSR->getRowPtr(), pathRowPtr.c_str(), LCSR->getRowPtr().size());
-    dumpToMem(LCSR->getColIdx(), pathParents.c_str(), LCSR->getColIdx().size());
+  #endif
+
+  #if !defined(REWRITE_ENABLED) || defined(DUMP_CSR) 
+    string pathVals ("/tmp/" + fileName + "_vals.bin");
+    string pathParents ("/tmp/" + fileName + "_parents.bin");
+    string pathRowPtr ("/tmp/" + fileName + "_rowPtr.bin");
+
+    // if loops exist
+    if(analyzer->getSingleLoopRows()) {
+      string pathB ("/tmp/" + fileName + "_b.bin");
+      string pathRowIndices ("/tmp/" + fileName + "_rowIndices.bin");
+
+      #ifdef PAR
+      #pragma omp parallel sections num_threads(2)
+      {
+        #pragma omp section
+        { dumpToMem(b, pathB.c_str(), LCSR->getRows()-1); }
+
+        #pragma omp section
+        { dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size()); }
+      }
+      #else
+        dumpToMem(b, pathB.c_str(), LCSR->getRows()-1);
+        dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size());
+      #endif
+    }
+
+    #ifdef PAR
+    #pragma omp parallel sections num_threads(3)
+    {
+      #pragma omp section
+      { dumpToMem(LCSR->getVals(), pathVals.c_str(), LCSR->getNNZs()); }
+
+      #pragma omp section
+      { dumpToMem(LCSR->getRowPtr(), pathRowPtr.c_str(), LCSR->getRowPtr().size());  }
+
+      #pragma omp section
+      { dumpToMem(LCSR->getColIdx(), pathParents.c_str(), LCSR->getColIdx().size()); }
+    }
+    #else
+      dumpToMem(LCSR->getVals(), pathVals.c_str(), LCSR->getNNZs());
+      dumpToMem(LCSR->getRowPtr(), pathRowPtr.c_str(), LCSR->getRowPtr().size());
+      dumpToMem(LCSR->getColIdx(), pathParents.c_str(), LCSR->getColIdx().size());
+    #endif
 
     cout << "Matrix dimensions:\n";
     cout << "rowPtr: " << LCSR->getRowPtr().size() << "\n";
     cout << "colIdx: " << LCSR->getColIdx().size() << "\n";
     cout << "values: " << LCSR->getVals().size() << "\n";
+  #endif
 
-    #ifdef REWRITE_ENABLED
-      vector<int> transformedRowPtr, transformedColIdx;
-      vector<double> transformedValues;
-      buildTransformedMatrix(transformedRowPtr, transformedColIdx, transformedValues);
-
-      dumpToMem(transformedValues, pathVals.append(extension_TR).c_str(), transformedValues.size());
-      dumpToMem(transformedRowPtr, pathRowPtr.append(extension_TR).c_str(), transformedRowPtr.size());
-      dumpToMem(transformedColIdx, pathParents.append(extension_TR).c_str(), transformedColIdx.size());
-    #endif
-  }
   auto t8 = std::chrono::steady_clock::now();
-  cout << "chrono dump data: " << std::chrono::duration_cast<std::chrono::duration<double>>(t8 - t7).count()*1000 << "\n";
+  #ifdef PAR
+  cout << "* chrono dump data: " << chrono::duration<double>(t8 - t7).count()*1000 << "\n";
+  #else
+  cout << "chrono dump data: " << chrono::duration<double>(t8 - t7).count()*1000 << "\n";
+  #endif
 
 
   return returnVal;
@@ -1563,19 +1655,11 @@ void Rewrite::buildTransformedMatrix(vector<int>& transformedRowPtr, vector<int>
   transformedRowPtr.push_back(0);
 
   for(int i = 0; i < rows; i++) {
-    if(rewritingStrategy->isRewritten(i)) {
-      vector<double>& rewrittenValues = rewrittenRowValues[i];
-      transformedValues.insert(transformedValues.end(), rewrittenValues.begin(), rewrittenValues.end());
-      transformedValues.push_back(1.0); // own value
-    } else {
-      vector<double>& rowValues = values[i];
-      transformedValues.insert(transformedValues.end(), rowValues.begin(), rowValues.end());
-    }
+    vector<double>& rowValues = values[i];
+    transformedValues.insert(transformedValues.end(), rowValues.begin(), rowValues.end());
 
-    vector<int>& parents = rewritingStrategy->isRewritten(i) ? rewrittenRowParents[i] : dag[i].first;
-  //  cout << "row: " << i << " parents size: " << parents.size() << " last rowptr: " << transformedRowPtr.back() << "\n";
+    vector<int>& parents = dag[i].first;
     transformedRowPtr.push_back(transformedRowPtr.back() + parents.size() + 1);
-
     transformedColIdx.insert(transformedColIdx.end(), parents.begin(), parents.end());
     transformedColIdx.push_back(i);
   }
@@ -1588,6 +1672,5 @@ void Rewrite::buildTransformedMatrix(vector<int>& transformedRowPtr, vector<int>
   cout << "rowPtr: " << transformedRowPtr.size() << "\n";
   cout << "colIdx: " << transformedColIdx.size() << "\n";
   cout << "values: " << transformedValues.size() << "\n";
-
 }
 #endif

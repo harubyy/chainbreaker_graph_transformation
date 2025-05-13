@@ -1,19 +1,46 @@
 #!/bin/bash
 
+# $1: merge_on or merge_off
+# $2: type of executable
+#     rewrite/release/debug
+# $3: strategy: 3cri or costmap
+
+if [ $# -ne 3 ]; then
+  echo "enter the path: merge_on or merge_off and then the tyep of the exec."
+  echo "type of the executable: rewrite/release/debug"
+  echo "e.g. ./run_10 merge_on rewrite 3cri"
+  echo "e.g. ./run_10 merge_on rewrite costmap"
+  exit
+fi
+
+#if ! [ -d results/"$1"/"$2"/"$3" ]; then
+#  mkdir results/"$1"/"$2"/"$3"
+#else
+#  rm -rf results/"$1"/"$2"/"$3"/*
+#fi
+
+OMP_PROC_BIND=true ; export OMP_PROC_BIND
+OMP_DYNAMIC=false ; export OMP_DYNAMIC
+OMP_WAIT_POLICY=active ; export OMP_WAIT_POLICY
+
 while read matrix
 do
   ID=`echo $matrix | cut -d',' -f1`
   name=`echo $matrix | cut -d',' -f2`
 
+  rm chrono.avg."$name".csv &> /dev/null
   for i in {1..10}
   do
     echo "running for $name with ID: $ID"
     rm -rf $name report."$name"
-    ./build/release "$ID" &> report."$name"
-    ./get_timing.sh "$name" "ORI"
+    ./build/"$2" "$ID" &> report."$name"
+    ./timing.sh "$name" "TR"
   done
 
-  rm -rf $name
-  ./get_timing_avg.sh "$name" "ORI"
-done < matrix.ID.name_
+#  rm -rf $name
+  ./timing_avg.sh "$name" "TR"
+
+#mv  $name report."$name" results/"$1"/"$2"/"$3"/
+#done < matrix.ID.name_
+done < matrix.ID.name
 

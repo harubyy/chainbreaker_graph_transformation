@@ -26,6 +26,7 @@ typedef enum {
 
 class Part {
   private:
+    // TODO: make these aligned
     vector<int> rowPtr;
     vector<int> colIdx;
     vector<double> vals;
@@ -93,17 +94,18 @@ class Part {
 
 // TODO: check for alignment
 class Matrix {
-  int rows, cols, nnzs;
   int* rowPtr;
   int* colIdx;
   double* vals;
 
-  uf_matrix_t* uf_mat;
-  uf_field_t field;
-  int matID;
-
   Part* L;
   Part* U;
+
+  uf_matrix_t* uf_mat;
+  uf_field_t field;
+
+  int rows, cols, nnzs;
+  int matID;
   FORMAT format;
 
  public:

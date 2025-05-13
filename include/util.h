@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <errno.h>
 #include "matrix.h"
 
 // dump some data to memory to be used by the generated code
@@ -20,7 +21,8 @@ int dumpToMem(vector<T>& data, const char* filePath, int numOfElements) {
   //size_t size = data.size() * sizeof(T);
   size_t size = numOfElements * sizeof(T);
 
-  //cout << "data size: " << data.size() << "\n";
+//  cout << "data size: " << data.size() << "\n";
+//  cout << "size: " << size << "\n";
 
   fd = open(filePath, O_RDWR | O_CREAT | O_TRUNC, (mode_t)0600);
   if(fd == -1) {
@@ -32,6 +34,7 @@ int dumpToMem(vector<T>& data, const char* filePath, int numOfElements) {
   if(result == -1) {
     close(fd);
     perror("Error calling lseek() to 'stretch' the file");
+    printf("%s\n",strerror(errno));
     exit(EXIT_FAILURE);
   }
 
@@ -141,3 +144,35 @@ void removeParanthesis(string fileName, int prevPartCounter) {
   str.write(" ",1); // remove the closing paranthesis at the end
   str.close();
 }
+
+void printVect(vector<int>& vect) {
+  for(auto& item: vect)
+  std::cout << item << ", ";
+  std::cout << "\n";
+}
+
+// VERIFICATION OF XREF
+void verifyX(int rows, vector<pair<vector<int>, vector<int>>>& allParents, vector<vector<double>>& allRowValues, vector<double>& b, vector<double>& x) {
+  vector<double> xVerify(rows, 0.000000);
+  for(int i = 0; i < rows; i++) {
+    vector<int>& parents = allParents[i].first;
+    vector<double>& rowValues = allRowValues[i];
+
+    double sum = 0.0;
+    for(int j = 0 ; j < parents.size() ; j++)
+      sum += rowValues[j] * x[parents[j]];
+    xVerify[i]= (b[i] - sum)/rowValues.back();
+//    printf("b[%d]: %.6f,  xVerify[%d]: %.6f\n",i, b[i], i, xVerify[i]);
+  }
+
+   int errCnt = 0;
+ // printf("printing errors\n");
+   for (int i = 0; i < rows ; i++)
+     if(fabs(1.0000000 - xVerify[i]) >= 1e-2) {
+       errCnt++;
+  //     printf("x[%d]: %.5f\n",i,xVerify[i]);
+     }
+
+   printf("errCnt:%d\n", errCnt); 
+}
+

@@ -76,7 +76,7 @@ void Matrix::extractLCSC() {
   //        cout << "rowPtr[" << j << "]= " << rowPtr[j] << ", " << "i= " << i << ", nnzPtr= " << nnzPtr << "\n";
         if (rowPtr[j] >= i) {
           rowPtrL.push_back(rowPtr[j]);
-          if((rowPtr[j] == i) && (rowPtr[j] == 0)) {
+          if((rowPtr[j] == i) || (rowPtr[j] == 0)) {
           //if(rowPtr[j] == i) {
             valsL.push_back(1.0); // vals[j];
           } else {
@@ -89,8 +89,6 @@ void Matrix::extractLCSC() {
   
       colIdxL.insert(colIdxL.begin() + (i + 1), colIdxL[i] + count);
     }
-  
-    colIdxL.insert(colIdxL.begin() + cols, colIdxL[cols - 1] + count);
   
     printf("A's unit-lower triangular L: ( %i, %i ) nnz = %i\n", rows, cols, nnzPtr);
   
@@ -133,7 +131,7 @@ void Matrix::extractLCSR() {
       for (int j = rowPtr[i]; j < rowPtr[i + 1]; j++) {
         if (colIdx[j] <= i) {
           colIdxL.push_back(colIdx[j]);
-          if((colIdx[j] == i) && (colIdx[j] == 0)) {
+          if((colIdx[j] == i) || (colIdx[j] == 0)) {
           //if(colIdx[j] == i) {
             valsL.push_back(1.0); // vals[j];
           } else {
@@ -146,8 +144,6 @@ void Matrix::extractLCSR() {
   
       rowPtrL.insert(rowPtrL.begin() + (i + 1), rowPtrL[i] + count);
     }
-  
-    rowPtrL.insert(rowPtrL.begin() + rows, rowPtrL[rows - 1] + count);
   
     printf("A's unit-lower triangular L: ( %i, %i ) nnz = %i\n", rows, cols, nnzPtr);
   

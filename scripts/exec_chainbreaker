@@ -1,0 +1,36 @@
+#!/bin/bash
+# use: enter path: ./exec_chainbreaker par_8_40_merge_on_rewrite/new3cri
+
+
+OMP_PROC_BIND=true ; export OMP_PROC_BIND
+OMP_DYNAMIC=false ; export OMP_DYNAMIC
+OMP_WAIT_POLICY=active ; export OMP_WAIT_POLICY
+
+while read matrix
+do
+  ID=`echo $matrix | cut -d',' -f1`
+  name=`echo $matrix | cut -d',' -f2`
+
+  cd "$1"/$name
+  rm out  &> /dev/null
+  echo "running chainbreaker for $name with ID: $ID"
+  for i in {1..10}
+  do
+    ./chainbreaker >> out
+  done
+
+  rm timing."$name"  &> /dev/null
+  grep "execution" out > timing."$name"
+  awk '{sum += $2} END{print "avg:," sum/10}' timing."$name" >> timing."$name"
+  cd -
+done < matrix.ID.name
+
+rm "$1"/exectimes.csv  &> /dev/null
+while read mtx
+do 
+  name=`echo $mtx | cut -d, -f2`
+  echo -n "$name",  >> "$1"/exectimes.csv
+  avg=`tail -1 "$1"/"$name"/timing."$name"`
+  echo $avg >> "$1"/exectimes.csv
+done < matrix.ID.name
+

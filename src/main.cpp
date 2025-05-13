@@ -6,8 +6,9 @@
 #include "matrix.h"
 #include "rewrite.h"
 #include "analyzer.h"
-//#include "util.h"
-
+#ifdef REWRITE_ENABLED
+  #include "strategy.h"
+#endif
 using namespace std;
 
 int main(int argc, char *argv[]) {
@@ -38,23 +39,17 @@ int main(int argc, char *argv[]) {
 
   matrixCSC->extractLCSC();
 
-  Analyzer* analyzer = new Analyzer(matrixCSR, matrixCSC);
- // analyzer->buildRowHist();
+  int cols = matrixCSC->getL()->getCols();
+  Analyzer* analyzer = new Analyzer(matrixCSR, matrixCSC, cols);
  auto t1 = std::chrono::steady_clock::now();
   analyzer->buildLevels();
-//  analyzer->printLevelTable();
-//  analyzer->printDAG();
-//  analyzer->printValues();
-//  analyzer->printLevels();
   analyzer->calculateFLOPS();
  auto t2 = std::chrono::steady_clock::now();
- cout << "chrono build DAG: " << std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count()*1000 << "\n";
+ cout << "chrono build DAG: " << chrono::duration<double>(t2 - t1).count()*1000 << "\n";
 
-  analyzer->report(string ("BEFORE"));
+  analyzer->report(string ("BEFORE"), 0);
 
   #ifdef REWRITE_ENABLED
-    //analyzer->printDependencies();
-
  auto t3 = std::chrono::steady_clock::now();
 //    RewriteByCostMap* rewritingStrategy = new RewriteByCostMap(matrixCSR->getL()->getRows() - 1, StartPoint::BottomUp, analyzer);
     RewriteByThreeCriteria* rewritingStrategy = new RewriteByThreeCriteria(matrixCSR->getL()->getRows() - 1, StartPoint::BottomUp, analyzer);
@@ -62,25 +57,24 @@ int main(int argc, char *argv[]) {
     rewritingStrategy->shiftRowsUp();
     vector<int> emptyLevels;
     rewritingStrategy->findEmptyLevels(emptyLevels);
-    analyzer->correctAfterRewritingStrategy(emptyLevels);
+    analyzer->updateWithEmptyLevels(emptyLevels);
  auto t4 = std::chrono::steady_clock::now();
- cout << "chrono transform DAG: " << std::chrono::duration_cast<std::chrono::duration<double>>(t4 - t3).count()*1000 << "\n";
+ cout << "chrono transform DAG: " << chrono::duration<double>(t4 - t3).count()*1000 << "\n";
 
-    analyzer->report(string ("AFTER"));
     rewritingStrategy->printRowsToBeRewritten();
 
+ t1 = std::chrono::steady_clock::now();
     Rewrite rewriter(matrixCSR, matrixCSC, std::string(matrixCSR->getUF_matrix()->name), rewritingStrategy, analyzer);
   #else
+ t1 = std::chrono::steady_clock::now();
     Rewrite rewriter(matrixCSR, matrixCSC, std::string(matrixCSR->getUF_matrix()->name), analyzer);
   #endif
 
   rewriter.rewrite();
-   
-/*  #ifdef REWRITE_ENABLED
-    rewritingStrategy->printRowsToBeRewritten();
-    rewritingStrategy->printRewritingMap();
-    analyzer->report(string ("AFTER"));
-  #endif*/
+ t2 = std::chrono::steady_clock::now();
+ cout << "chrono rewrite module: " << chrono::duration<double>(t2 - t1).count()*1000 << "\n";
+    
+  analyzer->report(string ("AFTER"), 0);
 
   return 0;
 }
