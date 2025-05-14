@@ -1,5 +1,5 @@
 # chainbreaker_graph_transformation
-Copyright 2022, Buse Yılmaz, All rights Reserved.
+Copyright 2025, Buse Yılmaz, All rights Reserved.
 
 # Publications
 > * Buse Yilmaz.
