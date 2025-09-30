@@ -41,7 +41,8 @@ class Analyzer {
     // AMAD: avg. memory access distance of a row
     // MID: max. indegree distance (I'm curious)
     float ALC, AIR, ARL;
-    float ALC_CV, AIR_CV, ARL_CV;
+    float pro_ALC, pro_AIR, pro_ARL; // property of the matrix
+    float ALC_CV, AIR_CV, ARL_CV;    // property coeff. of var.
     int MMAD, MID;
     float AMAD;
 
@@ -92,7 +93,10 @@ class Analyzer {
     float getAMAD();
 
     // compute AIR, ARL, MMAD, MID, AMAD (ALC is calculated in calculateFLOPS)
-    void analyzeForCriteria();
+    void analyzeForCriteria();  // NEW3CRI
+    void analyzeForCriteria3CRI();
+    void analyzeForCriteriaImproved();
+    void analyzeForCriteria2();
     void analyzeForCriteriaCostMap();
     void analyzeForCriteriaCoeff();
 

@@ -244,8 +244,8 @@ class RewriteByThreeCriteria : public RewritingStrategy {
           levelCost = analyzer->getFlopsPerLevel();
           #ifdef REWRITE_ENABLED
             analyzer->separateThinLevels();
-            analyzer->analyzeForCriteria();
- //           analyzer->analyzeForCriteriaCoeff();
+            analyzer->analyzeForCriteria2();
+            //analyzer->analyzeForCriteriaCoeff();
             analyzer->printCriteria();
             analyzer->saveOriginalValues();
           #endif
