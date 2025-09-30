@@ -244,7 +244,9 @@ void Analyzer::buildLevels() {
   #ifdef PAR
    #pragma omp parallel for num_threads(NUM_THREADS) if(size > WL_SIZE) reduction(+:ARL,AIR)
   #endif
-  for(auto& level : levelTable) {
+  //for(auto& level : levelTable) {
+  for(int i = 0; i < levelTable.size(); i++) {
+    vector<int>& level = levelTable[i];
     ARL += level.size();
     for(auto& row : level)
       AIR += dag[row].first.size();
@@ -258,6 +260,9 @@ void Analyzer::buildLevels() {
 
   ARL /= levelTable.size();
   AIR /= matrixCSC->getNumOfRows();
+
+  pro_ARL = ARL;
+  pro_AIR = AIR;
 }
 
 void Analyzer::separateRows(vector<int>& loopedRows, vector<int>& unrolledRows) {
@@ -337,6 +342,7 @@ void Analyzer::calculateFLOPS() {
   //flopsPerLevel.shrink_to_fit();
   totalFLOPSPerLevel = accumulate(flopsPerLevel.begin(), flopsPerLevel.end(), 0.0);
   ALC = totalFLOPSPerLevel/numOfLevels;
+  pro_ALC = ALC;
 
 //  ALC *= 2;
 }
@@ -357,6 +363,40 @@ void Analyzer::analyzeForCriteriaCostMap() {
   ALC = ceil(ALC);
 }
 
+
+//threeCriteria
+void Analyzer::analyzeForCriteria3CRI() {
+  AIR = ARL = MMAD = MID = 0;
+  for(int i = 1; i < numOfLevels; i++) {
+    vector<int>& level = levelTable[i];
+
+    for(auto& row : level) {
+      vector<int>& parents = dag[row].first;
+      AIR += parents.size();
+
+    }
+  }
+
+  AIR /= matrixCSC->getNumOfRows(); 
+  AIR = ceil(AIR);
+  
+  for(auto& level : flopsBelowAvg) {
+    vector<int>& currLevel = levelTable[level.first];
+    ARL += currLevel.size();
+  }
+
+  ARL /= flopsBelowAvg.size();
+  ARL = ceil(ARL);
+
+  /*// ARL for all
+ *   ARL = ceil(matrixCSC->getNumOfRows()/levelTable.size());*/
+
+  cout << "\nALC: " << ALC << "\n";
+  cout << "AIR: " << AIR << " ARL: " << ARL << "\n";
+  }
+
+
+// NEW3CRI
 void Analyzer::analyzeForCriteria() {
   AIR = ARL = MMAD = MID = 0;
   AMAD = 0; // too costly to calculate
@@ -411,7 +451,7 @@ void Analyzer::analyzeForCriteria() {
 
   AIR /= matrixCSC->getNumOfRows(); 
   AIR = ceil(AIR);
-
+  
   ARL /= flopsAboveAvg.size();
   ARL = ceil(ARL);
 
@@ -456,20 +496,117 @@ void Analyzer::analyzeForCriteria() {
   if(AIR_CV  < 0.5)
     AIR = 1.5 * AIR;
 
+
   auto end = chrono::high_resolution_clock::now();
   #if defined(PAR) || (numOfLevels > WL_SIZE)
-    cout << fixed << setprecision(4) << "* chrono analyzeForCriteria:, " << chrono::duration<double>(end-start).count() * 1000 << "\n";
+    cout << fixed << setprecision(4) << "* chrono analyzeForCriteriaNEW3CRI:, " << chrono::duration<double>(end-start).count() * 1000 << "\n";
   #else
-  cout << fixed << setprecision(4) << "chrono analyzeForCriteria:, " << chrono::duration<double>(end-start).count() * 1000 << "\n";
+  cout << fixed << setprecision(4) << "chrono analyzeForCriteriaNEW3CRI:, " << chrono::duration<double>(end-start).count() * 1000 << "\n";
   #endif
+}
 
-/*  ALC *= 2;
-  ARL *= 2;
-  AIR *=2;*/
+// 3CRI_IMPROVED
+void Analyzer::analyzeForCriteriaImproved() {
+  AIR = ARL = MMAD = MID = 0;
+  AMAD = 0; // too costly to calculate
+
+  auto start = chrono::high_resolution_clock::now();
+
+  ALC = 0; ARL = 0;
+  for(auto& level : flopsAboveAvg) {
+    vector<int>& currLevel = levelTable[level.first];
+
+    ARL += currLevel.size();
+    ALC += level.second;
+  }
+
+  ALC /= flopsAboveAvg.size();
+  ALC = ceil(ALC);
+
+  ARL /= flopsAboveAvg.size();
+  ARL = ceil(ARL);
+
+  AIR = ALC/ARL;
+
+  // ARL for all
+  int ARL_ALL = ceil(matrixCSC->getNumOfRows()/levelTable.size());
+
+  char bash_cmd[50] = "getconf _NPROCESSORS_ONLN";
+  FILE* pipe;
+  int numThreads = 0;
+  pipe = popen(bash_cmd, "r");
+  if(pipe != NULL)
+    fscanf(pipe, "%d", &numThreads);
+  ARL = max(max((int)ARL, ARL_ALL), numThreads);
+  
+  ALC = AIR * ARL;
+
+  auto end = chrono::high_resolution_clock::now();
+  #if defined(PAR) || (numOfLevels > WL_SIZE)
+    cout << fixed << setprecision(4) << "* chrono analyzeForCriteriaImproved:, " << chrono::duration<double>(end-start).count() * 1000 << "\n";
+  #else
+  cout << fixed << setprecision(4) << "chrono analyzeForCriteriaImproved:, " << chrono::duration<double>(end-start).count() * 1000 << "\n";
+  #endif
+}
+
+// 2CRI
+void Analyzer::analyzeForCriteria2() {
+  AIR = ARL = MMAD = MID = 0;
+  AMAD = 0; // too costly to calculate
+
+  auto start = chrono::high_resolution_clock::now();
+  #ifdef PAR
+  #pragma omp parallel for num_threads(NUM_THREADS) if(numOfLevels > WL_SIZE) reduction(+:AIR)
+  #endif
+  for(int i = 1; i < numOfLevels; i++) {
+    vector<int>& level = levelTable[i];
+
+    for(auto& row : level) {
+      vector<int>& parents = dag[row].first;
+      AIR += parents.size();
+    }
+  }
+
+  ALC = 0; ARL = 0;
+  for(auto& level : flopsAboveAvg) {
+    vector<int>& currLevel = levelTable[level.first];
+
+    ARL += currLevel.size();
+  }
+
+  AIR /= matrixCSC->getNumOfRows(); 
+  AIR = ceil(AIR);
+  
+  float rowCost = AIR * 8;
+  printf("rowCost: %.2lf\n", rowCost);
+
+  ARL /= flopsAboveAvg.size();
+  ARL = ceil(ARL);
+
+  // ARL for all
+  int ARL_ALL = ceil(matrixCSC->getNumOfRows()/levelTable.size());
+
+  char bash_cmd[50] = "getconf _NPROCESSORS_ONLN";
+  FILE* pipe;
+  int numThreads = 0;
+  pipe = popen(bash_cmd, "r");
+  if(pipe != NULL)
+    fscanf(pipe, "%d", &numThreads);
+  ARL = max(max((int)ARL, ARL_ALL), numThreads);
+  
+  printf("ARL calculated: %.2lf\n", ARL);
+  ALC = rowCost * ARL;
+
+  auto end = chrono::high_resolution_clock::now();
+  #if defined(PAR) || (numOfLevels > WL_SIZE)
+    cout << fixed << setprecision(4) << "* chrono analyzeForCriteria2:, " << chrono::duration<double>(end-start).count() * 1000 << "\n";
+  #else
+  cout << fixed << setprecision(4) << "chrono analyzeForCriteria2:, " << chrono::duration<double>(end-start).count() * 1000 << "\n";
+  #endif
 }
 
 void Analyzer::analyzeForCriteriaCoeff() {
-  float sum_ARL = 0.0, sum_ALC = 0.0;
+  /*float sum_ARL = 0.0, sum_ALC = 0.0;
 
   float sum = 0.0;
   auto start = chrono::high_resolution_clock::now();
@@ -485,7 +622,26 @@ void Analyzer::analyzeForCriteriaCoeff() {
   ARL_CV = sqrt(sum_ARL)/ARL;
 
   sum_ALC /= flopsAboveAvg.size();
-  ALC_CV = sqrt(sum_ALC)/ALC;
+  ALC_CV = sqrt(sum_ALC)/ALC;*/
+
+  float sum_ARL = 0.0, sum_ALC = 0.0, sum = 0.0;
+
+  auto start = chrono::high_resolution_clock::now();
+  pro_AIR = pro_ALC = pro_ARL = 0.0;
+  #ifdef PAR
+  #pragma omp parallel for num_threads(NUM_THREADS) if(numOfLevels > WL_SIZE) reduction(+:sum)
+  #endif
+  for(int i = 0; i < levelTable.size(); i++) {
+    vector<int>& level = levelTable[i];
+    pro_ARL += level.size();
+    for(auto& row : level)
+      pro_AIR += dag[row].first.size();
+  }
+
+  pro_ARL /= levelTable.size();
+  pro_AIR /= matrixCSC->getNumOfRows();
+  float total = accumulate(flopsPerLevel.begin(), flopsPerLevel.end(), 0.0);
+  pro_ALC = total/numOfLevels;
 
   #ifdef PAR
   #pragma omp parallel for num_threads(NUM_THREADS) if(numOfLevels > WL_SIZE) reduction(+:sum)
@@ -493,22 +649,26 @@ void Analyzer::analyzeForCriteriaCoeff() {
   for(int i = 1; i < numOfLevels; i++) {
     vector<int>& level = levelTable[i];
 
+    sum_ARL += (level.size() - pro_ARL) * (level.size() - pro_ARL);
+    sum_ALC += (flopsPerLevel[i] - pro_ALC) * (flopsPerLevel[i] - pro_ALC);
+
     for(auto& row : level) {
       vector<int>& parents = dag[row].first;
-      sum += (parents.size() - AIR) * (parents.size() - AIR);
+      sum += (parents.size() - pro_AIR) * (parents.size() - pro_AIR);
     }
   }
 
+  sum_ARL /= flopsPerLevel.size();
+  ARL_CV = sqrt(sum_ARL)/pro_ARL;
+
+  sum_ALC /= flopsPerLevel.size();
+  ALC_CV = sqrt(sum_ALC)/pro_ALC;
+
   sum /= matrixCSC->getNumOfRows(); 
-  AIR_CV = sqrt(sum)/AIR;
+  AIR_CV = sqrt(sum)/pro_AIR;
 
-  //printf("COEFF OF VAR.\nALC_CV:, %.2f\nARL_CV:, %.2f\nAIR_CV:, %.2f\n", ALC_CV, ARL_CV, AIR_CV);
+  printf("COEFF OF VAR.\nALC_CV:, %.2f\nARL_CV:, %.2f\nAIR_CV:, %.2f\n", ALC_CV, ARL_CV, AIR_CV);
 
-  // update AIR
-  if(AIR_CV  < 0.5)
-    AIR = 1.5 * AIR;
-//  printf("AIR:,%.2f\n", AIR);
-//
   auto end = chrono::high_resolution_clock::now();
 //  printf("num of levels size: %zu\n", flopsAboveAvg.size());
   #if defined(PAR) || (numOfLevels > WL_SIZE)
@@ -669,6 +829,8 @@ void Analyzer::report(string reportType, int reportStep) {
   cout << "\nREPORT:, " << reportType << "\n";
   if(reportType.compare("BEFORE") == 0){
     cout << "num. of levels:, " << getNumOfLevels() << "\n";
+    printCriteria();
+    analyzeForCriteriaCoeff();
     printFLOPSPerLevel();
 //    printLevelTable();
     printLevelSizes();
@@ -683,7 +845,8 @@ void Analyzer::report(string reportType, int reportStep) {
    //   analyzeForCriteria();
 
       cout << "num. of levels:, " << getNumOfLevels() << "\n";
-//      printCriteria();
+   //   printCriteria();
+      analyzeForCriteriaCoeff();
 //    printValues();
       //printFLOPSDivided();
 //      printLevelTable();

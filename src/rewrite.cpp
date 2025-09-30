@@ -104,40 +104,40 @@ void Rewrite::writeMain(std::ostream &stream, int numOfParts, int parentsSize) {
          << "#include <stdio.h>\n"
          << "#include \"util.h\"\n\n";
 
-  stream << "#define FILEPATH \"/tmp/" + fileName + ".bin\"\n"
+  stream << "#define FILEPATH \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + ".bin\"\n"
          << "#define X_SIZE " +  to_string(rows-1) + "\n";
 
  #ifdef REWRITE_ENABLED
    if(analyzer->getSingleLoopRows()) {
-     stream << "#define FILEPATH_B \"/tmp/" + fileName + "_b_TR.bin\"\n"
-            << "#define FILEPATH_PARENTS \"/tmp/" + fileName + "_parents_TR.bin\"\n"
-            << "#define FILEPATH_ROWPTR \"/tmp/" + fileName + "_rowPtr_TR.bin\"\n"
-            << "#define FILEPATH_ROWINDICES \"/tmp/" + fileName + "_rowIndices_TR.bin\"\n"
-            << "#define FILEPATH_VALUES \"/tmp/" + fileName + "_vals_TR.bin\"\n"
+     stream << "#define FILEPATH_B \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_b_TR.bin\"\n"
+            << "#define FILEPATH_PARENTS \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_parents_TR.bin\"\n"
+            << "#define FILEPATH_ROWPTR \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowPtr_TR.bin\"\n"
+            << "#define FILEPATH_ROWINDICES \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowIndices_TR.bin\"\n"
+            << "#define FILEPATH_VALUES \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_vals_TR.bin\"\n"
             << "#define FILESIZE_P (PARENTS_SIZE * sizeof(int))\n"
             << "#define FILESIZE_ROWPTR (X_SIZE * sizeof(int))\n"
             << "#define FILESIZE_ROWINDICES (" + to_string(rowIndices.size()) + " * sizeof(int))\n"
             << "#define FILESIZE_VAL (PARENTS_SIZE * sizeof(double))\n"
             << "#define PARENTS_SIZE " +  to_string(parentsSize) + "\n\n"; 
    } else {
-       stream << "#define FILEPATH_PARENTS \"/tmp/" + fileName + "_parents_TR.bin\"\n"
-              << "#define FILEPATH_ROWPTR \"/tmp/" + fileName + "_rowPtr_TR.bin\"\n"
-              << "#define FILEPATH_VALUES \"/tmp/" + fileName + "_vals_TR.bin\"\n"
+       stream << "#define FILEPATH_PARENTS \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_parents_TR.bin\"\n"
+              << "#define FILEPATH_ROWPTR \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowPtr_TR.bin\"\n"
+              << "#define FILEPATH_VALUES \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_vals_TR.bin\"\n"
               << "#define PARENTS_SIZE " +  to_string(parentsSize) + "\n\n"; 
    }
  #else
    if(analyzer->getSingleLoopRows()) {
-     stream << "#define FILEPATH_B \"/tmp/" + fileName + "_b.bin\"\n"
-            << "#define FILEPATH_PARENTS \"/tmp/" + fileName + "_parents.bin\"\n"
-            << "#define FILEPATH_ROWPTR \"/tmp/" + fileName + "_rowPtr.bin\"\n"
-            << "#define FILEPATH_ROWINDICES \"/tmp/" + fileName + "_rowIndices.bin\"\n"
-            << "#define FILEPATH_VALUES \"/tmp/" + fileName + "_vals.bin\"\n"
+     stream << "#define FILEPATH_B \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_b.bin\"\n"
+            << "#define FILEPATH_PARENTS \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_parents.bin\"\n"
+            << "#define FILEPATH_ROWPTR \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowPtr.bin\"\n"
+            << "#define FILEPATH_ROWINDICES \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowIndices.bin\"\n"
+            << "#define FILEPATH_VALUES \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_vals.bin\"\n"
             << "#define FILESIZE_ROWINDICES (" + to_string(rowIndices.size()) + " * sizeof(int))\n"
             << "#define PARENTS_SIZE " +  to_string(vals) + "\n\n"; 
    } else {
-       stream << "#define FILEPATH_PARENTS \"/tmp/" + fileName + "_parents.bin\"\n"
-              << "#define FILEPATH_ROWPTR \"/tmp/" + fileName + "_rowPtr.bin\"\n"
-              << "#define FILEPATH_VALUES \"/tmp/" + fileName + "_vals.bin\"\n"
+       stream << "#define FILEPATH_PARENTS \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_parents.bin\"\n"
+              << "#define FILEPATH_ROWPTR \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowPtr.bin\"\n"
+              << "#define FILEPATH_VALUES \"/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_vals.bin\"\n"
               << "#define PARENTS_SIZE " +  to_string(vals) + "\n\n"; 
    }
  #endif
@@ -1249,13 +1249,13 @@ void Rewrite::mergeSingleThreadedLevels() {
 int Rewrite::rewriteExecutor(vector<double> &b) {
   Part *L = matrixCSR->getL();
   analyzer->setSingleLoopRows(false);
-  writeUtil();
+ // writeUtil();
 
   vector<vector<int>>& levelTable = analyzer->getLevelTable();
   auto& flopsPerLevel = analyzer->getFlopsPerLevel();
   int partCounter = 0, headerCounter = 0, partCounterStart = 0, maxNumOfThreads = 1;
 
-  mergeSingleThreadedLevels();
+  //mergeSingleThreadedLevels();
 
   // Tracker keeps start of each part(tracker[0]) & num of thread(tracker[1]), part: workload of a thread
   vector< vector<int> > tracker(2, vector<int>(TABLE_SIZE,0));
@@ -1309,7 +1309,7 @@ int Rewrite::rewriteExecutor(vector<double> &b) {
     streamLevel.open(fileName + "/calculate" + to_string(partCounter) + ".c");
 
     if(!streamLevel.is_open())
-      std::cout << __LINE__ << " Cannot open output file!\n";
+      std::cout << __LINE__ << " Cannot open output file!\n"; 
 
     // merged = 0 (not merged), =1 (merged), =2 (merged but beginning level)
     if(levelLookUp.find(j) != levelLookUp.end()) {
@@ -1357,9 +1357,9 @@ int Rewrite::rewriteExecutor(vector<double> &b) {
   
       if(((j % TABLE_SIZE) == (TABLE_SIZE-1)) || (j == flopsPerLevel.size()-1)) {
         std::ofstream stream(fileName + "/run" + to_string(headerCounter) + ".c");
-        writeHeader(headerCounter, partCounterStart, partCounter, threadCounts);
+  //      writeHeader(headerCounter, partCounterStart, partCounter, threadCounts);
  //       printf("SINGLE: size:%d, part:%d, headCounter:%d\n", size, part, headerCounter);
-        writeFunc(stream, tracker, size, maxNumOfThreads, headerCounter);
+  //      writeFunc(stream, tracker, size, maxNumOfThreads, headerCounter);
         headerCounter++;
         partCounterStart = partCounter;
       }
@@ -1371,7 +1371,7 @@ int Rewrite::rewriteExecutor(vector<double> &b) {
     #endif
   }
 
-  #ifdef PAR
+/*  #ifdef PAR
   auto t11 = std::chrono::steady_clock::now();
   if(parFileGenThreadNum > 1) {
     #pragma omp parallel for schedule(static,2) num_threads(parFileGenThreadNum)
@@ -1393,7 +1393,7 @@ int Rewrite::rewriteExecutor(vector<double> &b) {
   else
  #endif
     cout << "chrono dump runX.c calculatorsX.h: " << chrono_serial * 1000 << "\n";
-
+*/
   #ifdef REPORT
     cout << "lookup table:\n";
     for(auto& item : levelLookUp)
@@ -1515,7 +1515,7 @@ int Rewrite::rewrite() {
   int parentsSize = dumpDataToMem(b);
   auto& flopsPerLevel = analyzer->getFlopsPerLevel();
 
-  start = std::chrono::steady_clock::now();
+  /*start = std::chrono::steady_clock::now();
   std::ofstream stream(fileName + "/main.c");
   if(!stream.is_open())
     std::cout << __LINE__ << " Cannot open output file!\n";
@@ -1525,7 +1525,8 @@ int Rewrite::rewrite() {
     
   writeMakefile(analyzer->getNumOfLevels());
   end = std::chrono::steady_clock::now();
-  cout << "chrono dump main & makefile: " << chrono::duration<double>(end-start).count()*1000 << "\n";
+  cout << "chrono dump main & makefile: " << chrono::duration<double>(end-start).count()*1000 << "\n";*/
+
 
   return 0;
 }
@@ -1537,9 +1538,9 @@ int Rewrite::dumpDataToMem(vector<double>& b) {
   int returnVal = 0;
 
   #ifdef REWRITE_ENABLED
-    string pathVals_TR ("/tmp/" + fileName + "_vals_TR.bin");
-    string pathParents_TR ("/tmp/" + fileName + "_parents_TR.bin");
-    string pathRowPtr_TR ("/tmp/" + fileName + "_rowPtr_TR.bin");
+    string pathVals_TR ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_vals_TR.bin");
+    string pathParents_TR ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_parents_TR.bin");
+    string pathRowPtr_TR ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowPtr_TR.bin");
 
     vector<int> transformedRowPtr, transformedColIdx;
     vector<double> transformedValues;
@@ -1548,10 +1549,10 @@ int Rewrite::dumpDataToMem(vector<double>& b) {
     
     // if loops exist
     if(analyzer->getSingleLoopRows()) {
-      string pathB ("/tmp/" + fileName + "_b_TR.bin");
-      string pathRowIndices ("/tmp/" + fileName + "_rowIndices_TR.bin");
+      string pathB ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_b_TR.bin");
+      string pathRowIndices ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowIndices_TR.bin");
 
-      #ifdef PAR
+/*      #ifdef PAR
       #pragma omp parallel sections num_threads(2)
       {
         #pragma omp section
@@ -1560,10 +1561,10 @@ int Rewrite::dumpDataToMem(vector<double>& b) {
         #pragma omp section
         { dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size()); }
       }
-      #else
+      #else*/
         dumpToMem(b, pathB.c_str(), LCSR->getRows()-1);
-        dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size());
-      #endif
+//        dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size());
+//      #endif
 
     }
 
@@ -1587,16 +1588,16 @@ int Rewrite::dumpDataToMem(vector<double>& b) {
   #endif
 
   #if !defined(REWRITE_ENABLED) || defined(DUMP_CSR) 
-    string pathVals ("/tmp/" + fileName + "_vals.bin");
-    string pathParents ("/tmp/" + fileName + "_parents.bin");
-    string pathRowPtr ("/tmp/" + fileName + "_rowPtr.bin");
+    string pathVals ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_vals.bin");
+    string pathParents ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_parents.bin");
+    string pathRowPtr ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowPtr.bin");
 
     // if loops exist
     if(analyzer->getSingleLoopRows()) {
-      string pathB ("/tmp/" + fileName + "_b.bin");
-      string pathRowIndices ("/tmp/" + fileName + "_rowIndices.bin");
+      string pathB ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_b.bin");
+      string pathRowIndices ("/okyanus/users/byilmaz02/chainbreaker/binary/dump/" + fileName + "_rowIndices.bin");
 
-      #ifdef PAR
+  /*    #ifdef PAR
       #pragma omp parallel sections num_threads(2)
       {
         #pragma omp section
@@ -1605,10 +1606,11 @@ int Rewrite::dumpDataToMem(vector<double>& b) {
         #pragma omp section
         { dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size()); }
       }
-      #else
+      #else */
         dumpToMem(b, pathB.c_str(), LCSR->getRows()-1);
-        dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size());
-      #endif
+ //       dumpToMem(rowIndices, pathRowIndices.c_str(), rowIndices.size());
+//      #endif
+
     }
 
     #ifdef PAR

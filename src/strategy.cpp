@@ -480,6 +480,7 @@ void RewriteByThreeCriteria::policy() {
 //       if((parents.size() <= avgIndegreePerRow) || (it->first - maxLevel == 1)) {
          if((parents.size() <= avgIndegreePerRow) && (it->first - maxLevel < REWRITING_DIST)
              || (it->first - maxLevel == 1)) {
+//         if((it->first - maxLevel < REWRITING_DIST) || (it->first - maxLevel == 1)) {
             rewriteCount++;
 
            levelCost[maxLevel] += costRow;
@@ -596,7 +597,9 @@ void RewriteByThreeCriteria::policy(int start, int end, ToBeRewritten& rewriting
          // relaxing the indegree constraint with rewriting distance == 1
 //       if((parents.size() <= avgIndegreePerRow) || (it->first - maxLevel == 1)) {
          if((parents.size() <= avgIndegreePerRow) && (it->first - maxLevel < REWRITING_DIST)
+         //if((it->first - maxLevel < REWRITING_DIST)
              || (it->first - maxLevel == 1)) {
+//         if((it->first - maxLevel < REWRITING_DIST) || (it->first - maxLevel == 1)) {  // 2CRI
             rewriteCount++;
 
            levelCost[maxLevel] += costRow;
@@ -624,10 +627,10 @@ void RewriteByThreeCriteria::policy(int start, int end, ToBeRewritten& rewriting
              break;
            }
          }
-         #ifdef FAILED_ANALYSIS
+/*         #ifdef FAILED_ANALYSIS
          else if(parents.size() > avgIndegreePerRow)
            failedRowsIndegree[row] = make_pair(it->first,parents.size());
-         #endif
+         #endif */
        } 
        #ifdef FAILED_ANALYSIS
          else 
